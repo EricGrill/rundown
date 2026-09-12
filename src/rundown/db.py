@@ -40,7 +40,12 @@ CREATE TABLE IF NOT EXISTS repos (
     tags TEXT,
     decision TEXT,
     category TEXT,
-    notes TEXT
+    notes TEXT,
+    hook TEXT,
+    who_for TEXT,
+    problem TEXT,
+    why_now TEXT,
+    demo_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS research_logs (
@@ -133,6 +138,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     }
     if "source_fingerprint" not in research_columns:
         conn.execute("ALTER TABLE research_logs ADD COLUMN source_fingerprint TEXT")
+    for card_field in ("hook", "who_for", "problem", "why_now", "demo_path"):
+        if card_field not in columns:
+            conn.execute(f"ALTER TABLE repos ADD COLUMN {card_field} TEXT")
 
 
 def upsert_repo(conn: sqlite3.Connection, repo: RepoInput) -> int:
@@ -317,6 +325,25 @@ def has_successful_execution(conn: sqlite3.Connection, repo_id: int) -> bool:
         (repo_id,),
     ).fetchone()
     return row is not None
+
+
+def list_repos_by_decision(
+    conn: sqlite3.Connection, decisions: list[str], include_archived: bool = False
+) -> list[sqlite3.Row]:
+    """List repositories with specific decision values, ordered for presentation."""
+    placeholders = ",".join("?" for _ in decisions)
+    where_parts = [f"decision IN ({placeholders})"]
+    if not include_archived:
+        where_parts.append("archived = 0")
+    where_clause = " AND ".join(where_parts)
+    return conn.execute(
+        f"""
+        SELECT * FROM repos
+        WHERE {where_clause}
+        ORDER BY relevance_score DESC, stars DESC, full_name ASC
+        """,
+        decisions,
+    ).fetchall()
 
 
 def upsert_project_mapping(

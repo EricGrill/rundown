@@ -1,8 +1,40 @@
 # Rundown
 
-Rundown turns GitHub stars into a searchable local catalog. It syncs repository metadata with the GitHub CLI, groups repositories into five broad categories, and saves AI-assisted research as Markdown alongside a SQLite index.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-The TUI stays focused on browsing and research. Scoring, cloning, maintenance, decisions, and execution checks remain available as CLI commands.
+**Turn your GitHub stars into an organized, searchable catalog with AI-powered research.**
+
+Rundown syncs your starred repositories, organizes them into five categories, and uses Claude, Gemini, or Codex CLIs to generate research summaries—all stored locally in SQLite and Markdown.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Rundown                                        Browse · Research · Read     │
+├───────────────────────────────────────────┬──────────────────────────────────┤
+│  Find a repository…                       │ astral-sh/uv                     │
+│  ┌─────────────────────────────────────┐  │                                  │
+│  │ All categories               ▾      │  │ An extremely fast Python package │
+│  └─────────────────────────────────────┘  │ and project manager, written in  │
+│  42 of 128 repositories · newest first    │ Rust.                            │
+│  ─────────────────────────────────────────│                                  │
+│  astral-sh/uv              Saved          │ Added: 2026-09-01 · Python       │
+│  pydantic/pydantic         Saved          │ Category: Developer Tools        │
+│  textualize/textual        Not researched │ Local copy: Cloned               │
+│  charmbracelet/bubbletea   Saved          │                                  │
+│  anthropics/anthropic-sdk  Saved          │ Saved research · 2026-09-10      │
+│  langchain-ai/langchain    Not researched │                                  │
+├───────────────────────────────────────────┴──────────────────────────────────┤
+│ Select a repo · r researches · Enter reads · Ctrl+P opens the menu           │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Features
+
+- **Sync stars** from GitHub using the `gh` CLI
+- **Auto-categorize** into AI & Agents, Developer Tools, Infrastructure & Security, Knowledge & Learning, or Apps & Business
+- **AI research** via Claude Code, Gemini CLI, or Codex CLI—your choice
+- **Browse and filter** in a keyboard-driven TUI
+- **Export** repositories marked for presentation to Markdown
+- **Local-first**: all data stays on your machine
 
 ## Requirements
 
@@ -13,8 +45,6 @@ The TUI stays focused on browsing and research. Scoring, cloning, maintenance, d
   - Claude Code: `claude auth login`
   - Gemini CLI: run `gemini` and complete its sign-in flow
   - Codex CLI: `codex login`
-
-Rundown does not read an AI API key itself. It calls the selected CLI, which uses its own saved authentication and configured default model. See the [Codex non-interactive mode documentation](https://developers.openai.com/codex/noninteractive/) for details about the Codex execution mode used here.
 
 ## Install
 
@@ -29,13 +59,25 @@ python -m pip install -e '.[dev]'
 
 The CLI is available as `rundown` and its short alias `rd`.
 
-Start the TUI:
+## Quick start
 
 ```bash
-rd tui
-```
+# Sync your GitHub stars
+rd sync-stars
 
-The TUI immediately loads any saved catalog, then syncs GitHub stars in the background. New repositories are categorized locally without an AI call.
+# Browse in the TUI
+rd tui
+
+# Research a specific repository (optional)
+rd research OWNER/REPO
+
+# Mark repositories for presentation
+rd mark astral-sh/uv present
+rd mark pydantic/pydantic shortlist
+
+# Export presentation-ready Markdown
+rd export
+```
 
 ## TUI keys
 
@@ -66,7 +108,7 @@ Research a bounded batch, newest star first:
 rd research-missing --limit 10
 ```
 
-The command shows overall progress, the current clone or research stage, elapsed time, and saved/failed counts. `Ctrl+C` stops the batch while keeping completed results. The batch skips repositories with any successful saved research. Researching a single repository from the TUI or `rd research` rechecks the source fingerprint and refreshes results when repository content or research-profile settings change.
+The command shows overall progress, the current clone or research stage, elapsed time, and saved/failed counts. `Ctrl+C` stops the batch while keeping completed results.
 
 Configure the provider in `config/rundown.toml`:
 
@@ -79,18 +121,40 @@ profile = "Describe the projects, languages, and constraints relevant to you."
 
 Valid providers are `auto`, `claude`, `gemini`, and `codex`. Rundown does not override a model, so each CLI uses its configured default.
 
-For local settings, copy the example and pass the private file explicitly:
+## Export for presentation
+
+Mark repositories you want to present:
 
 ```bash
-cp config/rundown.toml config/rundown.local.toml
-rd tui --config config/rundown.local.toml
+rd mark astral-sh/uv present
+rd mark pydantic/pydantic shortlist
 ```
 
-`config/*.local.toml` is ignored by Git.
+Add optional card fields for richer exports:
 
-## Data and privacy
+```bash
+rd card astral-sh/uv \
+  --hook "10x faster than pip" \
+  --who-for "Python developers" \
+  --problem "Slow package installs" \
+  --why-now "Growing dependency trees"
+```
 
-The default paths are relative to the configuration file's project root:
+Generate presentation-ready Markdown:
+
+```bash
+rd export                          # Exports present + shortlist repos
+rd export --decision present       # Only present
+rd export --output slides.md       # Custom output path
+```
+
+## Privacy and security
+
+Rundown is designed for local-first privacy:
+
+- **No API keys stored**: Rundown never reads or stores AI API keys. Authentication is delegated entirely to `gh auth login` and your AI CLI (`claude`, `gemini`, or `codex`).
+- **Local configuration**: Copy `config/rundown.toml` to `config/rundown.local.toml` for personal settings—it's gitignored.
+- **All data stays local**: The SQLite catalog, cloned repos, wiki pages, and logs are stored in local directories that are gitignored.
 
 | Path | Contents |
 | --- | --- |
@@ -100,27 +164,24 @@ The default paths are relative to the configuration file's project root:
 | `logs/` | Research and execution logs |
 | `exports/` | Generated exports |
 
-These directories are ignored by Git. Excluding private repositories from future syncs does not remove private repositories previously imported into the local catalog. Star sync stores GitHub metadata locally. Public starred repositories are synced by default; set `include_private = true` under `[github]` only if you also want private repositories visible to your authenticated `gh` account.
-
-Research sends the configured profile and preferences, the selected repository's GitHub metadata, a file tree up to three levels deep, its README, and supported root manifests to the selected AI CLI. Supported manifests include `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `requirements.txt`, Docker files, and `Makefile`. README and manifest files that are symlinks or resolve outside the clone are ignored.
-
-The AI subprocess starts in an empty temporary directory and receives repository context through its prompt. Rundown requests read-only or tool-free operation, but user-level configuration and extensions installed for that CLI may still apply. Review the provider's data policy and your CLI configuration before researching private or sensitive repositories.
+Research sends repository metadata and content excerpts to your configured AI CLI. Review the provider's data policy before researching private repositories.
 
 ## Other CLI commands
 
 Run `rd --help` for the full command list. Common commands include:
 
 ```bash
-rd sync-stars
-rd repos
-rd research OWNER/REPOSITORY
-rd classify
-rd update-repos
+rd sync-stars          # Sync stars from GitHub
+rd repos               # List all repositories
+rd research OWNER/REPO # Research a single repository
+rd classify            # Reclassify all repositories
+rd update-repos        # Update local clones
+rd mark REPO DECISION  # archived, rejected, fork, integrate, present, shortlist
+rd card REPO --hook .. # Set presentation card fields
+rd export              # Export marked repositories
 ```
 
 `rd run OWNER/REPOSITORY` only detects and reports a possible startup command. It does not execute repository code unless you add `--execute`. Non-Docker commands also require `--allow-non-docker`.
-
-Treat `--execute` as permission to run untrusted project code. Docker is preferred by the detector, but a container is not a security boundary: it may access networks, mounts, the Docker daemon, or host resources allowed by its configuration.
 
 ## Development
 
@@ -130,9 +191,6 @@ Run the test suite from the activated virtual environment:
 python -m pytest -q
 ```
 
-Current limitations:
+## License
 
-- Classification and startup-command detection use local heuristics.
-- Research quality, cost, and availability depend on the selected AI CLI and its account.
-- TUI actions that open GitHub or Markdown files currently use the macOS `open` command.
-- Alternate configuration files are loaded independently; they do not inherit values from `config/rundown.toml`.
+MIT License. See [LICENSE](LICENSE) for details.
