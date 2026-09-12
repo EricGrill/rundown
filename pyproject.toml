@@ -1,13 +1,26 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "rundown"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first CLI/TUI for turning GitHub stars into actionable repository intelligence."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Eric Grill" }]
+keywords = ["github", "research", "tui", "developer-tools"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
 dependencies = [
   "rich>=13.7",
   "textual>=0.80",
@@ -16,7 +29,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0",
+  "build==1.3.0",
+  "pyright==1.1.414",
+  "pytest==9.1.1",
+  "ruff==0.16.7",
 ]
 
 [project.scripts]
@@ -27,5 +43,29 @@ rd = "rundown.cli:main"
 testpaths = ["tests"]
 pythonpath = ["src"]
 
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rundown"]
+
 [tool.hatch.build.targets.sdist]
-include = ["src/", "tests/", "config/rundown.toml", "README.md", "pyproject.toml"]
+include = [
+  ".github/",
+  "src/",
+  "tests/",
+  "scripts/",
+  "config/rundown.toml",
+  "docs/",
+  "LICENSE",
+  "README.md",
+  "pyproject.toml",
+]

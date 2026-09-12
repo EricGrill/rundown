@@ -127,6 +127,49 @@ def test_init_db_adds_card_storage_to_existing_database(tmp_path):
     assert card_columns == {"repo_id", "view", "host_notes"}
 
 
+def test_init_db_adds_research_provenance_to_existing_database(tmp_path):
+    database = tmp_path / "app.sqlite"
+    with db.session(database) as conn:
+        conn.executescript(db.SCHEMA.replace("    provenance_json TEXT,\n", ""))
+        repo_id = db.upsert_repo(
+            conn, db.RepoInput("a/one", "a", "one", "https://github.com/a/one")
+        )
+        db.update_repo(
+            conn,
+            "a/one",
+            hook="Keep the hook",
+            who_for="Keep the audience",
+            notes="Keep the notes",
+        )
+        db.init_db(conn)
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(research_logs)")
+        }
+        repo = db.get_repo(conn, "a/one")
+
+    assert "provenance_json" in columns
+    assert repo["id"] == repo_id
+    assert repo["hook"] == "Keep the hook"
+    assert repo["who_for"] == "Keep the audience"
+    assert repo["notes"] == "Keep the notes"
+
+
+def test_successful_research_history_preserves_newest_first(tmp_path):
+    database = tmp_path / "app.sqlite"
+    with db.session(database) as conn:
+        db.init_db(conn)
+        repo_id = db.upsert_repo(
+            conn, db.RepoInput("a/one", "a", "one", "https://github.com/a/one")
+        )
+        db.insert_research_log(conn, repo_id, "Repository Understanding", "first", "success")
+        db.insert_research_log(conn, repo_id, "Repository Understanding", "failed", "failed")
+        db.insert_research_log(conn, repo_id, "Repository Understanding", "second", "success")
+
+        rows = db.latest_successful_research_history(conn, repo_id)
+
+    assert [row["summary"] for row in rows] == ["second", "first"]
+
+
 def test_repo_card_partial_upserts_preserve_other_field(tmp_path):
     database = tmp_path / "app.sqlite"
     with db.session(database) as conn:

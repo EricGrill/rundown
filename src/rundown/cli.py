@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import asdict
 from datetime import timedelta
 from enum import Enum
+import json
 from pathlib import Path
 from time import monotonic
 from typing import Annotated
@@ -18,7 +20,9 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from . import categories, db, execution, export, github, repo_ops, research, scoring, wiki
+from . import categories, db, execution, export, github, history, repo_ops, research, scoring, wiki
+from .demo import demo_environment
+from .doctor import run_doctor
 from .config import AppConfig, load_config
 from .tui import RundownApp
 
@@ -457,14 +461,17 @@ def export_repos(
         list[str] | None,
         typer.Option("--decision", "-d", help="Decision values to include (default: present, shortlist)."),
     ] = None,
+    view: Annotated[str | None, typer.Option("--view", help="host or research; defaults to each repository's saved view.")] = None,
 ) -> None:
     """Export presentation-ready Markdown for repositories marked present or shortlist."""
     cfg = _config(config)
+    if view is not None and view not in {"host", "research"}:
+        raise typer.BadParameter("Choose host or research.", param_hint="--view")
     decisions: list[str] = decision if decision else list(export.EXPORT_DECISIONS)
     output_path = output if output else cfg.exports_root / "rundown-export.md"
     with _conn(cfg) as conn:
         db.init_db(conn)
-        count = export.export_to_file(conn, output_path, decisions)
+        count = export.export_to_file(conn, output_path, decisions, config=cfg, view=view)
     if count:
         console.print(f"Exported {count} repositories to {output_path}")
     else:
@@ -475,6 +482,50 @@ def export_repos(
 def tui(config: Annotated[Path | None, typer.Option("--config", "-c")] = None) -> None:
     cfg = _config(config)
     RundownApp(cfg).run()
+
+
+@app.command("demo")
+def demo() -> None:
+    """Explore sample research offline in a temporary, isolated catalog."""
+    with demo_environment() as environment:
+        RundownApp(environment.config, fetch_starred=environment.fetch_starred, demo_mode=True).run()
+
+
+@app.command("doctor")
+def doctor(
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Print structured diagnostics.")] = False,
+) -> None:
+    """Check installation, configuration, authentication and local catalog health."""
+    report = run_doctor(config)
+    if json_output:
+        typer.echo(json.dumps({**asdict(report), "healthy": report.healthy}, indent=2))
+    else:
+        table = Table("Check", "Status", "Details", "Fix")
+        for item in report.checks:
+            table.add_row(Text(item.name), Text(item.status), Text(item.message), Text(item.fix or ""))
+        console.print(table)
+    raise typer.Exit(report.exit_code)
+
+
+@app.command("research-history")
+def research_history(
+    full_name: str,
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Include complete stored provenance and the last two successful reports.")] = False,
+) -> None:
+    """Show research sources and changes since the previous successful report."""
+    cfg = _config(config)
+    with _conn(cfg) as conn:
+        db.init_db(conn)
+        row = db.get_repo(conn, full_name)
+        if row is None:
+            raise typer.BadParameter(f"Unknown repository: {full_name}")
+        reports = [dict(report) for report in history.research_history(conn, row["id"])]
+    if json_output:
+        typer.echo(json.dumps([dict(report) for report in reports], indent=2))
+    else:
+        console.print(Text(history.format_research_history(reports)))
 
 
 def main() -> None:

@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from rundown import research
 from rundown.cards import SECTION_TITLES
 from rundown.config import AppConfig, ResearchSettings, load_config
+from rundown.processes import OperationCancelled
 
 REPORT = "\n\n".join(f"{heading}\nResearch content." for heading in research.REQUIRED_SECTIONS)
 JSON_REPORT = json.dumps(
@@ -59,6 +61,53 @@ def test_auto_falls_back_to_codex_after_other_agents_fail(tmp_path):
     ):
         assert research.generate_repository_research(config, "prompt", tmp_path) == REPORT
     assert [call.args[0][0] for call in run.call_args_list] == ["claude", "gemini", "codex"]
+
+
+def test_auto_reports_actual_successful_provider(tmp_path):
+    config = AppConfig(root=tmp_path)
+    with (
+        patch.object(research.shutil, "which", return_value="/bin/provider"),
+        patch.object(
+            research.subprocess,
+            "run",
+            side_effect=[
+                subprocess.CompletedProcess([], 1, "", "unavailable"),
+                subprocess.CompletedProcess([], 0, REPORT, ""),
+            ],
+        ),
+    ):
+        output, provider = research.generate_repository_research(
+            config,
+            "prompt",
+            tmp_path,
+            return_provider=True,
+        )
+
+    assert output == REPORT
+    assert provider == "gemini"
+
+
+def test_cancellation_stops_provider_fallback(tmp_path):
+    config = AppConfig(root=tmp_path)
+    cancelled = threading.Event()
+    cancelled.set()
+    with (
+        patch.object(research.shutil, "which", return_value="/bin/provider"),
+        patch.object(
+            research,
+            "run_command",
+            side_effect=OperationCancelled("Cancelled by user."),
+        ) as run,
+        pytest.raises(OperationCancelled, match="Cancelled by user"),
+    ):
+        research.generate_repository_research(
+            config,
+            "prompt",
+            tmp_path,
+            cancel_event=cancelled,
+        )
+
+    run.assert_called_once()
 
 
 def test_auto_uses_codex_when_other_clis_are_not_installed(tmp_path):

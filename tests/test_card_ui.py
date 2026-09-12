@@ -162,7 +162,8 @@ def test_explicit_refresh_bypasses_cache_and_preserves_notes(tmp_path):
                 await app.workers.wait_for_complete()
                 await pilot.pause()
                 cached.assert_not_called()
-                assert generate.call_args.kwargs == {'force': True}
+                assert generate.call_args.kwargs['force'] is True
+                assert not generate.call_args.kwargs['cancel_event'].is_set()
                 with db.session(config.database_path) as conn:
                     assert db.get_repo_card(conn, repo_id)['host_notes'] == 'Keep my introduction.'
 
@@ -269,7 +270,7 @@ def test_retry_after_failed_refresh_does_not_return_old_cache(tmp_path):
                 await app.workers.wait_for_complete()
                 await pilot.pause()
                 assert generate.call_count == 2
-                assert all(call.kwargs == {'force': True} for call in generate.call_args_list)
+                assert all(call.kwargs['force'] is True for call in generate.call_args_list)
                 cached.assert_not_called()
                 assert not app.research_errors
 

@@ -1,9 +1,13 @@
 """Tests for the export module and related CLI commands."""
+import json
+
 import pytest
 from typer.testing import CliRunner
 
-from rundown import db, export
+from rundown import db, export, preferences
+from rundown.cards import SECTION_TITLES
 from rundown.cli import app
+from rundown.config import AppConfig, CardSettings, CardTemplateSettings
 
 
 runner = CliRunner()
@@ -178,6 +182,172 @@ def test_export_to_file(tmp_path):
     assert "owner/shortlist-repo" in content
     assert "owner/inbox-repo" not in content
     assert "**Hook:** Fast and simple" in content
+
+
+def test_card_export_uses_effective_template_manual_overrides_and_host_notes(tmp_path):
+    database = tmp_path / "app.sqlite"
+    output_path = tmp_path / "host.md"
+    seed_repos(database, with_card=True)
+    config = AppConfig(root=tmp_path)
+    settings = CardSettings(
+        host=CardTemplateSettings(
+            sections=("why_now", "hook", "use_cases", "demo", "what_it_is"),
+            word_limit=100,
+        ),
+    )
+    card_json = json.dumps(
+        {
+            "schema_version": 1,
+            "sections": {
+                section_id: {
+                    "hook": "Generated hook",
+                    "what_it_is": "Generated explanation",
+                    "use_cases": "Generated audience",
+                    "why_now": "Generated urgency",
+                    "demo": "Generated demo",
+                }.get(section_id)
+                for section_id in SECTION_TITLES
+            },
+        }
+    )
+    with db.session(database) as conn:
+        db.init_db(conn)
+        repo = db.get_repo(conn, "owner/present-repo")
+        preferences.save_card_settings(conn, settings, repo["id"])
+        db.save_repo_card(conn, repo["id"], view="host", host_notes="Ask about adoption.")
+        db.insert_research_log(
+            conn,
+            repo["id"],
+            "Repository Understanding",
+            "generated",
+            "success",
+            card_json=card_json,
+        )
+        export.export_to_file(conn, output_path, ["present"], config=config)
+
+    content = output_path.read_text(encoding="utf-8")
+    assert content.index("### Why Now") < content.index("### Hook")
+    assert "CI costs rising" in content and "Generated urgency" not in content
+    assert "Fast and simple" in content and "Generated hook" not in content
+    assert "**For:** Developers" in content and "**Problem:** Slow builds" in content
+    assert "demo/example.mp4" in content and "Generated demo" not in content
+    assert "Generated explanation" in content
+    assert "### Host Notes\n\nAsk about adoption." in content
+    assert "### Repository Notes\n\nGreat for monorepos" in content
+
+
+def test_card_export_supports_explicit_research_view_and_legacy_markdown(tmp_path):
+    database = tmp_path / "app.sqlite"
+    output_path = tmp_path / "research.md"
+    seed_repos(database)
+    config = AppConfig(
+        root=tmp_path,
+        cards=CardSettings(
+            research=CardTemplateSettings(
+                sections=("risks", "what_it_is"),
+                word_limit=100,
+            )
+        ),
+    )
+    legacy = "## What This Is\n\nA legacy explanation.\n\n## Limitations and Risks\n\nA legacy risk."
+    with db.session(database) as conn:
+        db.init_db(conn)
+        repo = db.get_repo(conn, "owner/present-repo")
+        db.insert_research_log(
+            conn,
+            repo["id"],
+            "Repository Understanding",
+            legacy,
+            "success",
+        )
+        export.export_to_file(
+            conn,
+            output_path,
+            ["present"],
+            config=config,
+            view="research",
+        )
+
+    content = output_path.read_text(encoding="utf-8")
+    assert content.index("### Limitations and Risks") < content.index("### What This Is")
+    assert "A legacy risk." in content
+    assert "A legacy explanation." in content
+
+
+def test_card_export_keeps_notes_when_research_is_empty(tmp_path):
+    database = tmp_path / "app.sqlite"
+    output_path = tmp_path / "empty.md"
+    seed_repos(database, with_card=True)
+    config = AppConfig(root=tmp_path)
+    with db.session(database) as conn:
+        db.init_db(conn)
+        repo = db.get_repo(conn, "owner/present-repo")
+        db.save_repo_card(conn, repo["id"], host_notes="Keep this host note.")
+        export.export_to_file(conn, output_path, ["present"], config=config)
+
+    content = output_path.read_text(encoding="utf-8")
+    assert "Keep this host note." in content
+    assert "Great for monorepos" in content
+    assert "**For:** Developers" in content
+    assert "**Problem:** Slow builds" in content
+
+
+def test_research_export_preserves_manual_fields_omitted_by_template(tmp_path):
+    database = tmp_path / "app.sqlite"
+    output_path = tmp_path / "research-manual.md"
+    seed_repos(database, with_card=True)
+    with db.session(database) as conn:
+        db.init_db(conn)
+        export.export_to_file(
+            conn,
+            output_path,
+            ["present"],
+            config=AppConfig(root=tmp_path),
+            view="research",
+        )
+
+    content = output_path.read_text(encoding="utf-8")
+    assert "### Presentation Details" in content
+    assert "**Hook:** Fast and simple" in content
+    assert "Demo: demo/example.mp4" in content
+
+
+def test_card_export_preview_keeps_full_section_in_disclosure(tmp_path):
+    database = tmp_path / "app.sqlite"
+    output_path = tmp_path / "full-section.md"
+    seed_repos(database)
+    config = AppConfig(
+        root=tmp_path,
+        cards=CardSettings(
+            host=CardTemplateSettings(sections=("what_it_is",), word_limit=10)
+        ),
+    )
+    full_text = " ".join(f"word-{index}" for index in range(25))
+    card_json = json.dumps(
+        {
+            "schema_version": 1,
+            "sections": {
+                section_id: full_text if section_id == "what_it_is" else None
+                for section_id in SECTION_TITLES
+            },
+        }
+    )
+    with db.session(database) as conn:
+        db.init_db(conn)
+        repo = db.get_repo(conn, "owner/present-repo")
+        db.insert_research_log(
+            conn,
+            repo["id"],
+            "Repository Understanding",
+            "generated",
+            "success",
+            card_json=card_json,
+        )
+        export.export_to_file(conn, output_path, ["present"], config=config)
+
+    content = output_path.read_text(encoding="utf-8")
+    assert "<summary>Read full section</summary>" in content
+    assert full_text in content
 
 
 def test_export_cli_command(tmp_path):

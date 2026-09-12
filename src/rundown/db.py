@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS research_logs (
     error TEXT,
     source_fingerprint TEXT,
     card_json TEXT,
+    provenance_json TEXT,
     FOREIGN KEY(repo_id) REFERENCES repos(id)
 );
 
@@ -150,6 +151,11 @@ def init_db(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE repos ADD COLUMN {card_field} TEXT")
     if "card_json" not in research_columns:
         conn.execute("ALTER TABLE research_logs ADD COLUMN card_json TEXT")
+    if "provenance_json" not in research_columns:
+        conn.execute("ALTER TABLE research_logs ADD COLUMN provenance_json TEXT")
+    from .preferences import ensure_preferences_schema
+
+    ensure_preferences_schema(conn)
 
 
 def upsert_repo(conn: sqlite3.Connection, repo: RepoInput) -> int:
@@ -248,19 +254,21 @@ def insert_research_log(
     agent_name: str = "rundown",
     source_fingerprint: str | None = None,
     card_json: str | None = None,
+    provenance_json: str | None = None,
+    timestamp: str | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT INTO research_logs (
             repo_id, pass_type, timestamp, output_path, summary, agent_name, status, error,
-            source_fingerprint, card_json
+            source_fingerprint, card_json, provenance_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             repo_id,
             pass_type,
-            now_utc(),
+            timestamp or now_utc(),
             output_path,
             summary,
             agent_name,
@@ -268,6 +276,7 @@ def insert_research_log(
             error,
             source_fingerprint,
             card_json,
+            provenance_json,
         ),
     )
 
@@ -345,6 +354,26 @@ def latest_successful_research(
         """,
         (repo_id, pass_type),
     ).fetchone()
+
+
+def latest_successful_research_history(
+    conn: sqlite3.Connection,
+    repo_id: int,
+    *,
+    limit: int = 2,
+    pass_type: str = "Repository Understanding",
+) -> list[sqlite3.Row]:
+    if limit < 1:
+        return []
+    return conn.execute(
+        """
+        SELECT * FROM research_logs
+        WHERE repo_id = ? AND pass_type = ? AND status = 'success'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (repo_id, pass_type, limit),
+    ).fetchall()
 
 
 def latest_successful_research_by_repo(

@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Verify tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          expected = f"v{version}"
+          if os.environ["RELEASE_TAG"] != expected:
+              raise SystemExit(f"Tag must be {expected}")
+          PY
+      - name: Install pinned release tools
+        run: python -m pip install --disable-pip-version-check -c scripts/ci-constraints.txt -e ".[dev]"
+      - name: Require quality checks before publication
+        run: |
+          python -m pytest -q
+          python -m ruff check src tests scripts
+          python -m pyright --pythonpath "$(command -v python)"
+          python scripts/capture_tui.py
+      - name: Build and verify artifacts
+        run: |
+          python -m build
+          python scripts/verify_release.py dist
+          python -m venv /tmp/rundown-release-test
+          /tmp/rundown-release-test/bin/pip install -c scripts/ci-constraints.txt dist/*.whl
+          /tmp/rundown-release-test/bin/rd --help
+          /tmp/rundown-release-test/bin/python -c "from rundown.demo import load_demo_repositories; assert len(load_demo_repositories()) == 3"
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes --verify-tag

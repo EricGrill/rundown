@@ -23,7 +23,7 @@
 
 ## Information architecture
 - Primary navigation: repository catalog on left; reader on right.
-- Core screens: catalog/reader, action menu, host-notes editor.
+- Core screens: catalog/reader, action menu, host-notes editor, template editor, catalog views, research jobs, provenance/history.
 - Content hierarchy: repository identity, card view, short labeled sections, notes, expandable complete research.
 
 ## Design principles
@@ -79,4 +79,12 @@
 - Tests/screenshots: test config, parser, cache, note persistence, view switching, disclosure and compact layout; inspect both final card views.
 
 ## Open questions
-- None blocking this first version. Episode scheduling, dedicated demo records, and audience-facing exports are deferred.
+- None blocking this release. Episode scheduling and presenter mode remain deferred.
+
+## Workflow expansion (issues #7–#14)
+- Keep the catalog/reader primary. Put detailed template, filter, job and history controls in labeled keyboard-accessible screens rather than crowding the main toolbar.
+- Shortcuts: t templates, g catalog views, j research jobs, h research history; also discoverable through Ctrl+P.
+- Template editor: presets plus section visibility/order and live preview; global/repository scope is explicit; Escape cancels without writing.
+- Catalog views: status, category, sort and stale threshold are visible and named views are stored locally.
+- Jobs: text states and elapsed times, selected-job Retry/Cancel, terminal states retained for inspection; never hide failures behind a spinner.
+- New modal content must scroll at 80x24, with accessible actions and no horizontal overflow. Normal browsing and unrelated jobs stay usable while research runs.

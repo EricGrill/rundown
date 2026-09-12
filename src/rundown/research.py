@@ -5,12 +5,15 @@ import json
 import shutil
 import sqlite3
 import subprocess
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from . import db
 from .cards import SCHEMA_VERSION, SECTION_TITLES, parse_research
 from .config import AppConfig
+from .processes import check_cancelled, run_command
 from .wiki import append_section, ensure_wiki_page
 
 README_NAMES = ("README.md", "README.rst", "README.txt", "readme.md")
@@ -32,10 +35,19 @@ REQUIRED_SECTIONS = (
     "## Why It May Have Caught Your Eye",
 )
 RESEARCH_PROMPT_VERSION = "3"
+_REVISION_UNSET = object()
 
 
 class ResearchAgentError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class RepositoryContext:
+    text: str
+    files: tuple[dict[str, object], ...]
+    git_commit: str | None
+    working_tree_dirty: bool | None
 
 
 def is_repository_file(path: Path, root: Path) -> bool:
@@ -54,7 +66,12 @@ def find_readme(local_path: Path) -> Path | None:
     return None
 
 
-def collect_repository_context(local_path: Path, max_chars: int = 60000) -> str:
+def collect_repository_context_bundle(
+    local_path: Path,
+    max_chars: int = 60000,
+) -> RepositoryContext:
+    git_commit = repository_revision(local_path)
+    working_tree_dirty = repository_worktree_dirty(local_path)
     ignored = {".git", "node_modules", ".venv", "dist", "build"}
     visible_paths: list[str] = []
     for path in sorted(local_path.rglob("*")):
@@ -66,13 +83,15 @@ def collect_repository_context(local_path: Path, max_chars: int = 60000) -> str:
             break
 
     sections = ["Repository tree (up to three levels):", "\n".join(visible_paths)]
+    file_contents: list[tuple[str, str, int | None]] = []
     readme = find_readme(local_path)
     if readme is not None:
-        sections.extend(
-            [
-                f"\n--- {readme.name} ---",
+        file_contents.append(
+            (
+                readme.name,
                 readme.read_text(encoding="utf-8", errors="replace"),
-            ]
+                None,
+            )
         )
     else:
         sections.append("\nNo README file was found.")
@@ -80,13 +99,66 @@ def collect_repository_context(local_path: Path, max_chars: int = 60000) -> str:
     for name in CONTEXT_FILES:
         path = local_path / name
         if path != readme and is_repository_file(path, local_path):
-            sections.extend(
-                [
-                    f"\n--- {name} ---",
-                    path.read_text(encoding="utf-8", errors="replace")[:12000],
-                ]
+            file_contents.append(
+                (
+                    name,
+                    path.read_text(encoding="utf-8", errors="replace"),
+                    12000,
+                )
             )
-    return "\n".join(sections)[:max_chars]
+
+    context = "\n".join(sections)[:max_chars]
+    manifest: list[dict[str, object]] = []
+    for relative_path, content, file_limit in file_contents:
+        header = f"\n--- {relative_path} ---\n"
+        remaining = max_chars - len(context)
+        if remaining <= len(header):
+            break
+        capture_limit = remaining - len(header)
+        if file_limit is not None:
+            capture_limit = min(capture_limit, file_limit)
+        captured = content[:capture_limit]
+        context += header + captured
+        manifest.append(
+            {
+                "path": relative_path,
+                "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
+                "captured_chars": len(captured),
+                "truncated": len(captured) < len(content),
+            }
+        )
+    return RepositoryContext(
+        text=context,
+        files=tuple(manifest),
+        git_commit=git_commit,
+        working_tree_dirty=working_tree_dirty,
+    )
+
+
+def collect_repository_context(local_path: Path, max_chars: int = 60000) -> str:
+    return collect_repository_context_bundle(local_path, max_chars=max_chars).text
+
+
+def repository_revision(local_path: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def repository_worktree_dirty(local_path: Path) -> bool | None:
+    result = subprocess.run(
+        ["git", "-C", str(local_path), "status", "--porcelain"],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    return bool(result.stdout.strip())
 
 
 def build_research_prompt(
@@ -208,20 +280,17 @@ def repository_fingerprint(
     config: AppConfig,
     local_path: Path,
     repository_context: str,
+    *,
+    revision: str | None | object = _REVISION_UNSET,
 ) -> str:
-    revision = ""
-    result = subprocess.run(
-        ["git", "-C", str(local_path), "rev-parse", "HEAD"],
-        text=True,
-        capture_output=True,
+    captured_revision = (
+        repository_revision(local_path) if revision is _REVISION_UNSET else revision
     )
-    if result.returncode == 0:
-        revision = result.stdout.strip()
     fingerprint_input = "\n".join(
         [
             RESEARCH_PROMPT_VERSION,
             str(SCHEMA_VERSION),
-            revision,
+            str(captured_revision or ""),
             config.research.profile,
             config.cards.audience,
             config.cards.tone,
@@ -319,7 +388,10 @@ def generate_repository_research(
     config: AppConfig,
     prompt: str,
     local_path: Path,
-) -> str:
+    *,
+    cancel_event: threading.Event | None = None,
+    return_provider: bool = False,
+) -> str | tuple[str, str]:
     failures: list[str] = []
     for command in _agent_commands(config.research.provider, prompt):
         if shutil.which(command[0]) is None:
@@ -328,14 +400,21 @@ def generate_repository_research(
         try:
             # Context is supplied in the prompt; do not load a clone's CLI config/hooks.
             with TemporaryDirectory(prefix="rundown-research-") as workdir:
-                result = subprocess.run(
-                    command,
-                    cwd=workdir,
-                    stdin=subprocess.DEVNULL,
-                    text=True,
-                    capture_output=True,
-                    timeout=config.research.timeout_seconds,
-                )
+                run_kwargs = {
+                    "cwd": workdir,
+                    "stdin": subprocess.DEVNULL,
+                    "text": True,
+                    "capture_output": True,
+                    "timeout": config.research.timeout_seconds,
+                }
+                if cancel_event is None:
+                    result = subprocess.run(command, **run_kwargs)
+                else:
+                    result = run_command(
+                        command,
+                        cancel_event=cancel_event,
+                        **run_kwargs,
+                    )
         except subprocess.TimeoutExpired:
             failures.append(
                 f"{command[0]} exceeded the {config.research.timeout_seconds}s timeout"
@@ -354,7 +433,7 @@ def generate_repository_research(
                 f"{command[0]} returned incomplete research: {exc}"
             )
             continue
-        return output
+        return (output, command[0]) if return_provider else output
     raise ResearchAgentError(
         "No research agent produced a valid result. " + " | ".join(failures)
     )
@@ -366,19 +445,24 @@ def run_repository_research(
     full_name: str,
     *,
     force: bool = False,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[str, str]:
     row = db.get_repo(conn, full_name)
     if row is None:
         raise ValueError(f"Unknown repository: {full_name}")
+    if cancel_event is not None:
+        check_cancelled(cancel_event)
 
     if not force:
         cached = load_cached_repository_research(config, conn, row)
         if cached is not None:
             return "cached", cached
 
-    wiki_path = ensure_wiki_page(config.wiki_root, row)
     local_path = Path(row["local_path"]) if row["local_path"] else None
     if local_path is None or not local_path.exists():
+        if cancel_event is not None:
+            check_cancelled(cancel_event)
+        wiki_path = ensure_wiki_page(config.wiki_root, row)
         summary = "Repository research requires a local clone."
         db.insert_research_log(
             conn,
@@ -392,18 +476,44 @@ def run_repository_research(
         append_section(wiki_path, "Research Pass: Repository Understanding", summary)
         return "failed", summary
 
-    context = collect_repository_context(
+    context_bundle = collect_repository_context_bundle(
         local_path,
         max_chars=config.research.max_context_chars,
     )
-    fingerprint = repository_fingerprint(config, local_path, context)
+    context = context_bundle.text
+    fingerprint = repository_fingerprint(
+        config,
+        local_path,
+        context,
+        revision=context_bundle.git_commit,
+    )
     prompt = build_research_prompt(config, row, context)
     try:
-        provider_output = generate_repository_research(config, prompt, local_path)
+        generated = generate_repository_research(
+            config,
+            prompt,
+            local_path,
+            cancel_event=cancel_event,
+            return_provider=True,
+        )
+        if isinstance(generated, tuple):
+            provider_output, actual_provider = generated
+        else:
+            provider_output = generated
+            actual_provider = (
+                config.research.provider
+                if config.research.provider != "auto"
+                else "unknown"
+            )
         record = parse_research(provider_output, strict=True)
         summary = record.to_markdown()
         card_json = record.to_json()
+        if cancel_event is not None:
+            check_cancelled(cancel_event)
     except (ResearchAgentError, ValueError) as exc:
+        if cancel_event is not None:
+            check_cancelled(cancel_event)
+        wiki_path = ensure_wiki_page(config.wiki_root, row)
         summary = str(exc)
         db.insert_research_log(
             conn,
@@ -417,6 +527,25 @@ def run_repository_research(
         append_section(wiki_path, "Research Pass: Repository Understanding", summary)
         return "failed", summary
 
+    generated_at = db.now_utc()
+    provenance_json = json.dumps(
+        {
+            "provider": actual_provider,
+            "generated_at": generated_at,
+            "git_commit": context_bundle.git_commit,
+            "working_tree_dirty": context_bundle.working_tree_dirty,
+            "context_files": list(context_bundle.files),
+            "prompt_version": RESEARCH_PROMPT_VERSION,
+            "schema_version": SCHEMA_VERSION,
+            "source_evidence": "supplied_repository_context",
+            "citation_status": "generated_references_not_independently_verified",
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if cancel_event is not None:
+        check_cancelled(cancel_event)
+    wiki_path = ensure_wiki_page(config.wiki_root, row)
     append_section(wiki_path, "Research Pass: Repository Understanding", summary)
     db.insert_research_log(
         conn,
@@ -427,6 +556,8 @@ def run_repository_research(
         str(wiki_path),
         source_fingerprint=fingerprint,
         card_json=card_json,
+        provenance_json=provenance_json,
+        timestamp=generated_at,
     )
     db.update_repo(
         conn,

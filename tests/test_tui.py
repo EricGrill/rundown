@@ -164,7 +164,7 @@ def test_search_filters_name_and_description_then_researches_visible_repo(tmp_pa
 
     researched = []
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         researched.append(full_name)
         return "success", "## Result\n\nFiltered research result."
 
@@ -393,6 +393,11 @@ def test_command_palette_is_curated_filterable_and_invokes_find(tmp_path):
                 "Switch research card view",
                 "Edit host notes",
                 "Sync GitHub stars",
+                "Research jobs",
+                "Edit card template",
+                "Use global card template",
+                "Research provenance and changes",
+                "Catalog filters and saved views",
             }
 
             await pilot.press(*"sync github")
@@ -504,7 +509,7 @@ def test_research_key_preserves_selected_repo_after_sorted_reload(tmp_path):
 
     researched = []
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         researched.append(full_name)
         return "success", "Research completed."
 
@@ -563,7 +568,7 @@ def test_two_research_jobs_run_in_queue_order_and_preserve_selection(tmp_path):
     release_first = threading.Event()
     release_second = threading.Event()
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         research_calls.append(full_name)
         if full_name == "new/project":
             first_started.set()
@@ -788,14 +793,14 @@ def test_research_auto_clones_before_readme_analysis(tmp_path):
 
     calls = []
 
-    def fake_clone(_config, conn, full_name):
+    def fake_clone(_config, conn, full_name, **_options):
         calls.append(("clone", full_name))
         target = config.repo_root / "owner" / "project"
         target.mkdir(parents=True)
         db.update_repo(conn, full_name, local_path=str(target), status="cloned")
         return "cloned", "Clone completed."
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         calls.append(("research", full_name))
         return "success", "README analyzed."
 

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+from tempfile import TemporaryDirectory
+from threading import Event
 
 from . import db
 from .config import AppConfig
+from .processes import check_cancelled, run_command
 
 
-def clone_repo(config: AppConfig, conn, full_name: str) -> tuple[str, str]:
+def clone_repo(config: AppConfig, conn, full_name: str, *, cancel_event: Event | None = None) -> tuple[str, str]:
+    check_cancelled(cancel_event)
     row = db.get_repo(conn, full_name)
     if row is None:
         raise ValueError(f"Unknown repository: {full_name}")
@@ -28,11 +32,27 @@ def clone_repo(config: AppConfig, conn, full_name: str) -> tuple[str, str]:
         return "already_cloned", f"Found existing clone for {full_name} at {target}."
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        ["gh", "repo", "clone", full_name, str(target)],
-        text=True,
-        capture_output=True,
-    )
+    if cancel_event is None:
+        result = subprocess.run(
+            ["gh", "repo", "clone", full_name, str(target)],
+            text=True, capture_output=True,
+        )
+    else:
+        if target.exists():
+            return "failed", f"Clone destination already exists without a repository: {target}"
+        # A cancelled clone cannot leave a partial .git that the next job treats
+        # as complete. Only the staging directory owned by this job is removed.
+        with TemporaryDirectory(prefix=".rundown-clone-", dir=target.parent) as directory:
+            staged = Path(directory) / "repo"
+            result = run_command(
+                ["gh", "repo", "clone", full_name, str(staged)],
+                text=True, capture_output=True, cancel_event=cancel_event,
+            )
+            check_cancelled(cancel_event)
+            if result.returncode == 0:
+                if not (staged / ".git").exists():
+                    return "failed", "Clone did not produce a Git repository."
+                staged.rename(target)
     message = (result.stdout or result.stderr or "").strip()
     if result.returncode != 0:
         log_path = log_failure(
@@ -43,6 +63,7 @@ def clone_repo(config: AppConfig, conn, full_name: str) -> tuple[str, str]:
         )
         return "failed", f"Clone failed for {full_name}: {message}\nLog: {log_path}"
 
+    check_cancelled(cancel_event)
     db.update_repo(
         conn,
         full_name,

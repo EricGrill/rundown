@@ -1,7 +1,11 @@
+import hashlib
 import json
+import threading
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from rundown import db, execution, research, scoring, wiki
 from rundown.cards import SECTION_TITLES, record_from_saved
@@ -13,6 +17,7 @@ from rundown.config import (
     ResearchSettings,
     ScoringSettings,
 )
+from rundown.processes import OperationCancelled
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -45,6 +50,21 @@ def add_repo(conn, full_name="owner/project", local_path=None):
     if local_path:
         db.update_repo(conn, full_name, local_path=str(local_path))
     return db.get_repo(conn, full_name)
+
+
+def test_context_manifest_marks_per_file_capture_limit_as_truncated(tmp_path):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    source = "x" * 20_000
+    (repo_dir / "package.json").write_text(source, encoding="utf-8")
+
+    bundle = research.collect_repository_context_bundle(repo_dir)
+
+    manifest = bundle.files[0]
+    assert manifest["path"] == "package.json"
+    assert manifest["captured_chars"] == 12_000
+    assert manifest["truncated"] is True
+    assert manifest["sha256"] == hashlib.sha256(source[:12_000].encode()).hexdigest()
 
 
 def test_ensure_wiki_page_preserves_existing_content(tmp_path):
@@ -278,6 +298,107 @@ def test_structured_research_is_saved_as_markdown_and_card_json(tmp_path):
     assert not summary.lstrip().startswith("{")
     assert row["summary"] == summary
     assert json.loads(row["card_json"])["sections"]["what_it_is"] == "Content for what_it_is."
+
+
+def test_research_saves_provider_commit_and_captured_context_provenance(tmp_path):
+    config = make_config(tmp_path)
+    config.ensure_directories()
+    repo_dir = config.repo_root / "owner" / "project"
+    repo_dir.mkdir(parents=True)
+    (repo_dir / "README.md").write_text("# Evidence", encoding="utf-8")
+    provider_output = json.dumps(
+        {
+            "schema_version": 1,
+            "sections": {
+                section_id: ("Supported." if section_id in tuple(SECTION_TITLES)[:5] else None)
+                for section_id in SECTION_TITLES
+            },
+        }
+    )
+
+    with (
+        patch(
+            "rundown.research.generate_repository_research",
+            return_value=(provider_output, "gemini"),
+        ),
+        patch("rundown.research.repository_revision", return_value="a" * 40) as revision,
+        db.session(config.database_path) as conn,
+    ):
+        db.init_db(conn)
+        repo = add_repo(conn, local_path=repo_dir)
+        status, _ = research.run_repository_research(config, conn, "owner/project")
+        saved = db.latest_successful_research(conn, repo["id"])
+
+    provenance = json.loads(saved["provenance_json"])
+    assert status == "success"
+    assert saved["timestamp"] == provenance["generated_at"]
+    assert provenance["provider"] == "gemini"
+    assert provenance["git_commit"] == "a" * 40
+    assert revision.call_count == 1
+    assert provenance["working_tree_dirty"] is None
+    assert provenance["prompt_version"] == research.RESEARCH_PROMPT_VERSION
+    assert provenance["schema_version"] == research.SCHEMA_VERSION
+    assert provenance["context_files"][0]["path"] == "README.md"
+    assert len(provenance["context_files"][0]["sha256"]) == 64
+    assert provenance["citation_status"] == "generated_references_not_independently_verified"
+
+
+def test_cancelled_research_does_not_save_failure_or_partial_success(tmp_path):
+    config = make_config(tmp_path)
+    config.ensure_directories()
+    repo_dir = config.repo_root / "owner" / "project"
+    repo_dir.mkdir(parents=True)
+    (repo_dir / "README.md").write_text("# Project", encoding="utf-8")
+
+    with (
+        patch(
+            "rundown.research.generate_repository_research",
+            side_effect=OperationCancelled("Cancelled by user."),
+        ),
+        db.session(config.database_path) as conn,
+    ):
+        db.init_db(conn)
+        add_repo(conn, local_path=repo_dir)
+        with pytest.raises(OperationCancelled):
+            research.run_repository_research(config, conn, "owner/project")
+        logs = conn.execute("SELECT * FROM research_logs").fetchall()
+
+    assert logs == []
+    assert not (config.wiki_root / "repos" / "owner__project.md").exists()
+
+
+def test_cancellation_wins_race_with_provider_failure(tmp_path):
+    config = make_config(tmp_path)
+    config.ensure_directories()
+    repo_dir = config.repo_root / "owner" / "project"
+    repo_dir.mkdir(parents=True)
+    (repo_dir / "README.md").write_text("# Project", encoding="utf-8")
+    cancelled = threading.Event()
+
+    def fail_after_cancel(*_args, **_kwargs):
+        cancelled.set()
+        raise research.ResearchAgentError("provider failed")
+
+    with (
+        patch(
+            "rundown.research.generate_repository_research",
+            side_effect=fail_after_cancel,
+        ),
+        db.session(config.database_path) as conn,
+    ):
+        db.init_db(conn)
+        add_repo(conn, local_path=repo_dir)
+        with pytest.raises(OperationCancelled):
+            research.run_repository_research(
+                config,
+                conn,
+                "owner/project",
+                cancel_event=cancelled,
+            )
+        logs = conn.execute("SELECT * FROM research_logs").fetchall()
+
+    assert logs == []
+    assert not (config.wiki_root / "repos" / "owner__project.md").exists()
 
 
 def test_research_prompt_starts_with_meaning_and_includes_personal_context(tmp_path):
