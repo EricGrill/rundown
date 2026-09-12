@@ -1,6 +1,7 @@
 # Rundown
 
 [![CI](https://github.com/EricGrill/rundown/actions/workflows/ci.yml/badge.svg)](https://github.com/EricGrill/rundown/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/EricGrill/rundown)](https://github.com/EricGrill/rundown/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Turn your GitHub stars into an organized, searchable catalog with AI-powered research.**
@@ -44,24 +45,30 @@ Press `Ctrl+P` to open the searchable action menu:
 
 ## Install
 
-From a checkout of this repository:
+Install Rundown as an isolated command-line tool:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
+uv tool install git+https://github.com/EricGrill/rundown.git
 ```
 
-The CLI is available as `rundown` and its short alias `rd`.
-
-## Try it offline
+Or with pipx:
 
 ```bash
+pipx install git+https://github.com/EricGrill/rundown.git
+```
+
+The CLI is available as `rundown` and its short alias `rd`. Check your setup and explore the bundled demo:
+
+```bash
+rd doctor
 rd demo
 ```
 
-Explore bundled sample research in a temporary, isolated catalog. No GitHub login, AI provider, network access, or personal catalog is needed. Demo changes disappear on exit. See the [install and upgrade guide](docs/install.md) for isolated `uv` and `pipx` installations and versioned releases.
+See the [install and upgrade guide](docs/install.md) for upgrades, version releases, and development setup.
+
+## Try it offline
+
+`rd demo` opens bundled sample research in a temporary, isolated catalog. No GitHub login, AI provider, network access, or personal catalog is needed. Demo changes disappear on exit.
 
 ## Quick start
 
@@ -235,18 +242,26 @@ Diagnostics check Python, Git, GitHub CLI/authentication, provider commands, con
 Rundown is designed for local-first privacy:
 
 - **No API keys stored**: Rundown never reads or stores AI API keys. Authentication is delegated entirely to `gh auth login` and your AI CLI (`claude`, `gemini`, or `codex`).
+- **No telemetry**: Rundown does not collect usage data or phone home.
 - **Local configuration**: Copy `config/rundown.toml` to `config/rundown.local.toml` for personal settings—it's gitignored.
 - **All data stays local**: The SQLite catalog, cloned repos, wiki pages, and logs are stored in local directories that are gitignored.
 
-| Path | Contents |
-| --- | --- |
-| `data/` | SQLite catalog and research status |
-| `repos/` | Local clones used for research |
-| `wiki/` | Markdown repository pages and research |
-| `logs/` | Research and execution logs |
-| `exports/` | Generated exports |
+### What Rundown touches
+
+| Resource | How used | Leaves your machine? |
+| --- | --- | --- |
+| Local disk (`data/`, `repos/`, `wiki/`, `logs/`, `exports/`) | SQLite catalog, cloned repos, research, logs | No (gitignored) |
+| `gh` CLI | Star sync via `gh api` | GitHub API only |
+| AI CLI (`claude`, `gemini`, `codex`) | Research generation from repo excerpts | AI provider only |
+| Network | Cloning repos, GitHub API, AI provider calls | Only during sync/research |
+
+**Offline guarantees**: `rd demo` uses bundled fixtures and never touches network, GitHub, AI providers, or your catalog.
+
+**Trusted local tools**: Rundown shells out to `git`, `gh`, and your configured AI CLI. It does not execute repository code unless you explicitly run `rd run --execute --allow-non-docker`. Subprocess output is captured for research; Rundown does not inject credentials or override model configuration.
 
 Research sends repository metadata and content excerpts to your configured AI CLI. Review the provider's data policy before researching private repositories.
+
+See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## Other CLI commands
 
@@ -267,6 +282,16 @@ rd export              # Export marked repositories
 
 ## Development
 
+For an editable checkout:
+
+```bash
+git clone https://github.com/EricGrill/rundown.git
+cd rundown
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+```
+
 Run checks from the activated development environment:
 
 ```bash
@@ -280,7 +305,7 @@ python scripts/verify_release.py dist
 
 CI checks Linux and macOS on Python 3.11 and 3.14, compares twelve deterministic TUI snapshots, and installs the built wheel in a clean environment. After reviewing an intentional visual change, use `python scripts/capture_tui.py --update-baselines --png` to refresh SVG baselines and README images from the offline fixture.
 
-See the [delivery roadmap](docs/implementation-roadmap.md) and [release instructions](docs/install.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for pull request expectations and the [delivery roadmap](docs/implementation-roadmap.md) for current work. Release instructions are in [docs/install.md](docs/install.md).
 
 ## License
 

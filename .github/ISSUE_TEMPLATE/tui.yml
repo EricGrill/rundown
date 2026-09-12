@@ -1,0 +1,66 @@
+name: TUI issue
+description: Report a problem with the terminal user interface
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for issues with the TUI—rendering problems, key bindings, focus behavior, or visual glitches.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened in the TUI? What did you expect?
+      placeholder: Describe the problem clearly.
+    validations:
+      required: true
+
+  - type: input
+    id: screen
+    attributes:
+      label: Screen or modal
+      description: Which screen were you on?
+      placeholder: "Catalog, Reader, Template editor, Jobs modal, etc."
+    validations:
+      required: true
+
+  - type: input
+    id: key
+    attributes:
+      label: Key or action
+      description: What key did you press or action did you take?
+      placeholder: "Enter, Ctrl+P, clicking on..."
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, terminal emulator, terminal size, Python version
+      placeholder: |
+        - OS: macOS 14.5 / Ubuntu 24.04 / Windows 11
+        - Terminal: iTerm2 / gnome-terminal / Windows Terminal
+        - Size: 140x40 / 80x24
+        - Python: 3.11.9
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot (optional)
+      description: Attach a screenshot if it helps illustrate the issue.
