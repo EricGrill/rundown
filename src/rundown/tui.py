@@ -35,6 +35,8 @@ class RepositoryCommands(Provider):
             row = app.selected_row()
             if row is not None and row["wiki_path"] and Path(row["wiki_path"]).is_file():
                 yield "Open saved research file", app.action_open_wiki, "Open the existing Markdown wiki page."
+        if app.selected_full_name():
+            yield "Mark for presentation", app.action_mark_present, "p · Mark this repository for export."
         yield "Find repositories", app.action_find, "/ · Filter the list by repository name or description."
         yield "Filter by category", app.action_filter_category, "f · Choose one of five categories or show all repositories."
         yield "Classify starred repositories", app.action_classify, "Recompute the five categories locally, without AI calls."
@@ -82,6 +84,7 @@ class RundownApp(App):
         Binding("f", "filter_category", "Category"),
         Binding("enter", "read_selected", "Read"),
         Binding("r", "research_selected", "Research"),
+        Binding("p", "mark_present", "Present"),
         Binding("ctrl+p", "command_palette", "Menu", priority=True),
         Binding("q", "quit", "Quit"),
         Binding("escape", "back_to_list", show=False),
@@ -370,6 +373,24 @@ class RundownApp(App):
             self.notify_result(f"Could not open {label}: {exc}")
         else:
             self.notify_result(f"Opened {label}: {target}")
+
+    def action_mark_present(self) -> None:
+        full_name = self.selected_full_name()
+        if full_name:
+            with session(self.config.database_path) as conn:
+                init_db(conn)
+                row = db.get_repo(conn, full_name)
+                if row is None:
+                    self.notify_result(f"Unknown repository: {full_name}")
+                    return
+                current = row["decision"]
+                if current == "present":
+                    db.update_repo(conn, full_name, decision=None, status="new")
+                    self.notify_result(f"Unmarked {full_name} from presentation.")
+                else:
+                    db.update_repo(conn, full_name, decision="present", status="present")
+                    self.notify_result(f"Marked {full_name} for presentation. Run `rd export` to generate Markdown.")
+            self.load_rows()
 
     def action_research_selected(self) -> None:
         full_name = self.selected_full_name()

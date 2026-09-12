@@ -18,7 +18,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from . import categories, db, execution, github, repo_ops, research, scoring, wiki
+from . import categories, db, execution, export, github, repo_ops, research, scoring, wiki
 from .config import AppConfig, load_config
 from .tui import RundownApp
 
@@ -32,6 +32,8 @@ class RepoDecision(str, Enum):
     rejected = "rejected"
     fork = "fork"
     integrate = "integrate"
+    present = "present"
+    shortlist = "shortlist"
 
 
 def _config(config: Path | None) -> AppConfig:
@@ -313,7 +315,8 @@ def mark_repo(
         RepoDecision,
         typer.Argument(
             help=(
-                "Decision label. 'fork' and 'integrate' record intent only; "
+                "Decision label. 'present' and 'shortlist' mark repos for export. "
+                "'fork' and 'integrate' record intent only; "
                 "they do not modify the repository on GitHub."
             )
         ),
@@ -407,6 +410,65 @@ def rediscover(config: Annotated[Path | None, typer.Option("--config", "-c")] = 
             row["decision"] or "",
         )
     console.print(table)
+
+
+@app.command("card")
+def set_card(
+    full_name: str,
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    hook: Annotated[str | None, typer.Option("--hook", help="One-line pitch for the repository.")] = None,
+    who_for: Annotated[str | None, typer.Option("--who-for", help="Target audience.")] = None,
+    problem: Annotated[str | None, typer.Option("--problem", help="Problem it solves.")] = None,
+    why_now: Annotated[str | None, typer.Option("--why-now", help="Why it's relevant now.")] = None,
+    demo_path: Annotated[str | None, typer.Option("--demo-path", help="Path to demo file or URL.")] = None,
+    notes: Annotated[str | None, typer.Option("--notes", help="Additional notes.")] = None,
+) -> None:
+    """Set presentation card fields for a repository."""
+    cfg = _config(config)
+    fields = {
+        k: v for k, v in [
+            ("hook", hook),
+            ("who_for", who_for),
+            ("problem", problem),
+            ("why_now", why_now),
+            ("demo_path", demo_path),
+            ("notes", notes),
+        ] if v is not None
+    }
+    if not fields:
+        console.print("No card fields provided. Use --hook, --who-for, --problem, --why-now, --demo-path, or --notes.")
+        raise typer.Exit(code=1)
+    with _conn(cfg) as conn:
+        db.init_db(conn)
+        if db.get_repo(conn, full_name) is None:
+            raise typer.BadParameter(f"Unknown repository: {full_name}")
+        db.update_repo(conn, full_name, **fields)
+    console.print(f"Updated card for {full_name}: {', '.join(fields.keys())}")
+
+
+@app.command("export")
+def export_repos(
+    config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Output file path. Defaults to exports/rundown-export.md."),
+    ] = None,
+    decision: Annotated[
+        list[str] | None,
+        typer.Option("--decision", "-d", help="Decision values to include (default: present, shortlist)."),
+    ] = None,
+) -> None:
+    """Export presentation-ready Markdown for repositories marked present or shortlist."""
+    cfg = _config(config)
+    decisions = decision if decision else list(export.EXPORT_DECISIONS)
+    output_path = output if output else cfg.exports_root / "rundown-export.md"
+    with _conn(cfg) as conn:
+        db.init_db(conn)
+        count = export.export_to_file(conn, output_path, decisions)
+    if count:
+        console.print(f"Exported {count} repositories to {output_path}")
+    else:
+        console.print(f"No repositories with decision in {decisions}. Use `rd mark OWNER/REPO present` to mark repos for export.")
 
 
 @app.command("tui")
