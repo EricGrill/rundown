@@ -1,217 +1,151 @@
 # Rundown
 
-Local-first CLI/TUI to rank and present your best GitHub repos with clear metrics.
+> **Turn your GitHub stars into a ranked presentation queue.**  
+> Pick what's worth showing, explain why, and export a rundown.
 
-**Rundown** turns starred (and added) GitHub repos into a ranked presentation queue: pick what's worth showing, why, and export a rundown.
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776ab.svg?style=flat&logo=python&logoColor=white)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-101%20passed-brightgreen.svg)](#testing)
 
-![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)
-![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)
+---
 
-## Features
+## What It Does
 
-- **Sync stars** — Import your GitHub starred repos via `gh` CLI
-- **Add repos** — Manually add any repo by URL or `owner/repo`
-- **Score repos** — Automatic 0-100 score with explainable reasons
-- **Triage workflow** — Categorize repos: inbox → shortlist → present → hold → skip
-- **Rich TUI** — Interactive terminal interface for browsing and editing
-- **Card system** — Add presentation notes: hook, audience, problem, timing
-- **Export** — Generate presentation-ready Markdown
+Rundown is a **local-first CLI + TUI** for triaging GitHub repos. Sync your stars, score them automatically, shortlist the gems, add presentation notes, and export a polished rundown.
 
-## Installation
-
-### With uv (recommended)
-
-```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/rundown.git
-cd rundown
-
-# Install with uv
-uv pip install -e .
-
-# Or run directly
-uv run rundown --help
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Rundown                                                    09:30 AM         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Search repos...                              [All     ▾]                    │
+├──────────────────────────────────────────┬──────────────────────────────────┤
+│ Score │ Repository            │ Status   │ astral-sh/uv                     │
+│───────┼───────────────────────┼──────────│                                  │
+│  94   │ astral-sh/uv          │ present  │ An extremely fast Python package │
+│  92   │ pydantic/pydantic     │ present  │ and project manager, in Rust.    │
+│  88   │ textualize/textual    │ shortlist│                                  │
+│  85   │ charmbracelet/bubbles │ shortlist│ Score: 94/100                    │
+│  78   │ anthropic/cookbook    │ inbox    │ freshness(+30) | stars(+10)      │
+│  72   │ ollama/ollama         │ inbox    │                                  │
+│  65   │ jqlang/jq             │ hold     │ Status: present                  │
+│  45   │ BurntSushi/ripgrep    │ skip     │                                  │
+│                                          │ Card                             │
+│                                          │ Hook: Fastest Python pkg manager │
+│                                          │ For: Python devs tired of pip    │
+│                                          │ Problem: pip is painfully slow   │
+│                                          │                                  │
+│                                          │ Keys: i/s/p/h/x e o +/-          │
+├──────────────────────────────────────────┴──────────────────────────────────┤
+│ Total: 8 │ inbox: 2 │ shortlist: 2 │ present: 2 │ hold: 1 │ skip: 1         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ ? Help  r Refresh  o Open  e Edit  q Quit                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### With pip
-
-```bash
-pip install -e .
-```
-
-### Prerequisites
-
-- Python 3.11+
-- [GitHub CLI](https://cli.github.com/) (`gh`) — for syncing stars and fetching metadata
-
-```bash
-# Install gh CLI (macOS)
-brew install gh
-
-# Authenticate
-gh auth login
-```
+---
 
 ## Quick Start
 
 ```bash
-# 1. Sync your starred repos
+# Install with uv (recommended)
+git clone https://github.com/EricGrill/rundown.git
+cd rundown
+uv pip install -e .
+
+# Or with pip
+pip install -e .
+
+# Sync your GitHub stars (requires gh CLI)
 rundown sync-stars
 
-# 2. Launch the TUI to browse and triage
+# Launch the TUI
 rundown
 
-# 3. Set repos to "present" status, fill in cards
-# (use keyboard shortcuts in TUI)
-
-# 4. Export your rundown
-rundown export -o rundown.md
+# Export repos marked "present" to Markdown
+rundown export -o my-rundown.md
 ```
 
-## CLI Commands
+**Prerequisites:** Python 3.11+ and [GitHub CLI](https://cli.github.com/) (`gh auth login`)
+
+---
+
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `rundown` / `rundown tui` | Launch interactive TUI |
-| `rundown sync-stars` | Sync starred repos from GitHub |
-| `rundown add <repo>` | Add a repo (owner/repo or URL) |
-| `rundown list [-s status]` | List repos in database |
+| `rundown` | Launch interactive TUI |
+| `rundown sync-stars` | Import your GitHub stars |
+| `rundown add <repo>` | Add a repo by URL or `owner/repo` |
+| `rundown list [-s status]` | List repos (filter by status) |
 | `rundown show <repo>` | Show repo details |
-| `rundown status <repo> <status>` | Set repo status |
-| `rundown boost <repo> <-10..+10>` | Adjust manual score boost |
+| `rundown status <repo> <status>` | Set status |
+| `rundown boost <repo> <±N>` | Adjust score boost (-10 to +10) |
 | `rundown score` | Recalculate all scores |
 | `rundown export [-s status] [-o file]` | Export to Markdown |
-| `rundown stats` | Show database statistics |
-| `rundown config` | Show current configuration |
+| `rundown stats` | Show statistics |
+| `rundown config` | Show configuration |
 
-### Examples
+Alias: `rd` works the same as `rundown`.
 
-```bash
-# Add a specific repo
-rundown add https://github.com/astral-sh/uv
-rundown add astral-sh/ruff
+---
 
-# List shortlisted repos
-rundown list --status shortlist
-
-# Export only repos marked "present"
-rundown export --status present -o show-notes.md
-
-# Export all repos
-rundown export --all -o full-catalog.md
-
-# Boost a repo's score
-rundown boost astral-sh/uv 5
-```
-
-## TUI Keyboard Shortcuts
+## TUI Keybindings
 
 ### Navigation
-
 | Key | Action |
 |-----|--------|
-| `↑`/`↓` or `j`/`k` | Move selection |
-| `Home`/`End` | Jump to first/last |
-| `PgUp`/`PgDn` | Page up/down |
+| `↑`/`↓` `j`/`k` | Move selection |
+| `Home` / `End` | Jump to first/last |
+| `PgUp` / `PgDn` | Page up/down |
+| `/` | Focus search |
 
-### Status Changes
-
-| Key | Status |
-|-----|--------|
-| `i` | inbox |
-| `s` | shortlist |
-| `p` | present |
-| `h` | hold |
-| `x` | skip |
+### Status (human triage only)
+| Key | Status | Meaning |
+|-----|--------|---------|
+| `i` | **inbox** | Unreviewed |
+| `s` | **shortlist** | Worth considering |
+| `p` | **present** | Will show this |
+| `h` | **hold** | Maybe later |
+| `x` | **skip** | Not interested |
 
 ### Actions
-
 | Key | Action |
 |-----|--------|
-| `Enter` | View details |
-| `e` | Edit card |
+| `e` | Edit card (hook, audience, problem, etc.) |
 | `o` | Open in browser |
-| `r` | Refresh data |
-| `+`/`-` | Boost score ±1 |
+| `r` | Refresh from database |
+| `+` / `-` | Boost score ±1 |
 | `=` | Reset boost to 0 |
-
-### Filtering
-
-| Key | Action |
-|-----|--------|
-| `/` | Focus search |
-| `1` | Filter: inbox |
-| `2` | Filter: shortlist |
-| `3` | Filter: present |
-| `4` | Filter: hold |
-| `5` | Filter: skip |
+| `1-5` | Filter by status |
 | `0` | Show all |
-
-### Other
-
-| Key | Action |
-|-----|--------|
-| `?` | Toggle help |
+| `?` | Help |
 | `q` | Quit |
 
-## Workflow
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                      RUNDOWN WORKFLOW                    │
-└─────────────────────────────────────────────────────────┘
-
-   ┌──────────┐     ┌───────────┐     ┌─────────┐
-   │  GitHub  │────▶│   inbox   │────▶│shortlist│
-   │  Stars   │     │  (triage) │     │ (maybe) │
-   └──────────┘     └───────────┘     └─────────┘
-         │                │                 │
-         │                │                 │
-         ▼                ▼                 ▼
-   ┌──────────┐     ┌───────────┐     ┌─────────┐
-   │   add    │     │   skip    │     │ present │──▶ EXPORT
-   │ (manual) │     │ (archive) │     │ (show!) │
-   └──────────┘     └───────────┘     └─────────┘
-                          │
-                          ▼
-                    ┌───────────┐
-                    │   hold    │
-                    │  (later)  │
-                    └───────────┘
-```
-
-1. **Sync** — `rundown sync-stars` imports your GitHub stars
-2. **Browse** — Launch TUI, sort by score, review candidates
-3. **Triage** — Mark repos: shortlist promising ones, skip the rest
-4. **Curate** — For shortlisted repos, decide: present or hold
-5. **Annotate** — Fill in card fields (hook, audience, problem, why now)
-6. **Export** — Generate Markdown for your presentation
+---
 
 ## Scoring
 
-Each repo gets a **present_score** from 0-100, calculated from multiple factors:
-
-| Factor | Default Weight | Description |
-|--------|---------------|-------------|
-| `freshness` | 30 | Recency of last push (exponential decay) |
-| `description_quality` | 20 | Length and presence of description |
-| `readme_signal` | 15 | README exists and its size |
-| `stars_normalized` | 10 | Star count (log scale) |
-| `topics_count` | 10 | Number of repository topics |
-| `has_license` | 5 | Whether repo has a license |
-| `low_issues_ratio` | 5 | Low open issues relative to stars |
-| `manual_boost` | 5× | Your manual adjustment (-10 to +10) |
-| `archived_penalty` | -50 | Penalty for archived repos |
-
-The score includes an explainable `score_reason` showing top factors:
+Each repo gets a **0–100 score** with an explainable breakdown:
 
 ```
 freshness(+28): 5d ago | description(+18): 120 chars | stars(+8): 5,421★
 ```
 
-### Customizing Weights
+### Score Weights
 
-Edit `~/.config/rundown/config.toml`:
+| Factor | Weight | What It Measures |
+|--------|-------:|------------------|
+| **Freshness** | 30 | Days since last push (exponential decay, 180d half-life) |
+| **Description** | 20 | Length and presence of repo description |
+| **README** | 15 | README exists and its size |
+| **Stars** | 10 | Star count (log scale, so 10→100→1000 all matter) |
+| **Topics** | 10 | Number of GitHub topics/tags |
+| **License** | 5 | Has an OSI license |
+| **Issues ratio** | 5 | Low open issues relative to stars |
+| **Manual boost** | 5× | Your adjustment (−10 to +10) |
+| **Archived** | −50 | Penalty for archived repos |
+
+Customize weights in `~/.config/rundown/config.toml`:
 
 ```toml
 [weights]
@@ -219,52 +153,97 @@ freshness = 30.0
 description_quality = 20.0
 readme_signal = 15.0
 stars_normalized = 10.0
-topics_count = 10.0
-has_license = 5.0
-low_issues_ratio = 5.0
-manual_boost_multiplier = 5.0
-archived_penalty = -50.0
-freshness_half_life_days = 180
+# ... edit as needed
 ```
 
-Then recalculate: `rundown score`
+Then run `rundown score` to recalculate.
+
+---
 
 ## Card Fields
 
-When preparing repos for presentation, fill in these card fields:
+When preparing repos for presentation, fill in these fields:
 
 | Field | Purpose |
 |-------|---------|
 | **hook** | One-liner pitch — what makes this interesting? |
 | **who_for** | Target audience |
-| **problem** | Pain point it addresses |
-| **why_now** | Why is it relevant/trending now? |
-| **demo_path** | URL or local path to demo |
-| **flags** | Tags like `trending`, `sponsor`, `beta`, `warning` |
-| **notes** | Your personal notes for the presentation |
+| **problem** | Pain point it solves |
+| **why_now** | Why is it relevant now? |
+| **demo_path** | URL or path to a demo |
+| **flags** | Tags: `trending`, `sponsor`, `beta`, `warning` |
+| **notes** | Your personal notes |
 
-## Data Storage
+---
 
-- **Database**: `~/.local/share/rundown/rundown.db` (SQLite)
-- **Config**: `~/.config/rundown/config.toml` (TOML)
+## Example Export
 
-On Windows, these use `%LOCALAPPDATA%\rundown\` instead.
+```bash
+rundown export --status present -o show-notes.md
+```
 
-## Safety
+**Output** ([full example](docs/demo-export.md)):
 
-**Rundown does not execute any code from the repositories it indexes.**
+```markdown
+## [astral-sh/uv](https://github.com/astral-sh/uv)
 
-- No cloning of repos
-- No running of scripts or build systems
-- No execution of untrusted code
-- Read-only metadata fetching via GitHub API
+**The fastest Python package manager — 10-100x faster than pip**
 
-This is a presentation/triage tool, not a security research or code execution tool.
+Rust | ⭐ 89,000 | 📄 Apache-2.0
+
+**Who's it for:** Python developers tired of slow installs
+**Problem:** pip/poetry/pipenv are painfully slow
+**Why now:** Just hit 1.0 stable, production ready
+
+📊 Score: **94**/100 — freshness(+30): 0d ago | description(+20) | stars(+10)
+```
+
+---
+
+## Demo Data
+
+Try it without syncing your stars:
+
+```bash
+python samples/demo_data.py
+rundown tui
+```
+
+This loads well-known public repos for demo/screenshot purposes.
+
+---
+
+## Security & Privacy
+
+**Rundown is local-first with no telemetry.**
+
+| Principle | Implementation |
+|-----------|----------------|
+| **No tokens in code** | Auth is delegated to `gh auth login` only |
+| **No code execution** | Never clones, runs, or executes repo code |
+| **Local database** | SQLite stored at `~/.local/share/rundown/rundown.db` |
+| **No network** | Only calls GitHub API via `gh` CLI |
+| **No telemetry** | Zero analytics, tracking, or phone-home |
+
+Your starred repos and personal notes stay on your machine.
+
+---
+
+## Data Locations
+
+| File | Path |
+|------|------|
+| Database | `~/.local/share/rundown/rundown.db` |
+| Config | `~/.config/rundown/config.toml` |
+
+Windows uses `%LOCALAPPDATA%\rundown\` instead.
+
+---
 
 ## Development
 
 ```bash
-# Install dev dependencies
+# Install with dev dependencies
 uv pip install -e ".[dev]"
 
 # Run tests
@@ -274,6 +253,24 @@ pytest
 pytest --cov=rundown
 ```
 
+### Testing
+
+101 tests covering scoring, database, export, and parsing:
+
+```
+============================= 101 passed in 0.17s ==============================
+```
+
+---
+
 ## License
 
-MIT
+[MIT](LICENSE) — Use it however you want.
+
+---
+
+## Why "Rundown"?
+
+A **rundown** is a quick briefing on what matters. This tool helps you prep that briefing from your GitHub stars: score, triage, annotate, export.
+
+Built for anyone who stars repos faster than they can remember them.

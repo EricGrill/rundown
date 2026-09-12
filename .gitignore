@@ -1,4 +1,27 @@
+# =============================================================================
+# SECURITY: Never commit secrets, tokens, or personal data
+# =============================================================================
+
+# Environment and secrets
+.env
+.env.*
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+credentials*
+secrets*
+*_token*
+*.token
+
+# API keys / auth (never hardcode - use `gh auth login`)
+.netrc
+.gh-token
+
+# =============================================================================
 # Python
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,34 +42,72 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual environments
 .venv/
 venv/
 ENV/
 env/
+.conda/
 
-# IDE
+# =============================================================================
+# Data and databases (keep local, not in git)
+# =============================================================================
+*.db
+*.sqlite
+*.sqlite3
+data/
+*.dump
+*.sql.gz
+
+# Local Rundown data (never commit personal stars/notes)
+rundown.db
+exports/
+my-*.md
+
+# =============================================================================
+# Testing and coverage
+# =============================================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.cover
+
+# =============================================================================
+# IDE and editors
+# =============================================================================
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+*.sublime-project
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-
-# Database
-*.db
-
-# OS
+# =============================================================================
+# OS generated
+# =============================================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Rundown data (optional, user may want to track)
-# ~/.config/rundown/
-# ~/.local/share/rundown/
+# =============================================================================
+# Misc
+# =============================================================================
+*.log
+*.bak
+*.tmp
+.cache/

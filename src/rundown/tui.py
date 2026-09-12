@@ -162,6 +162,15 @@ class RundownApp(App):
         background: $surface;
     }
     
+    Header {
+        background: #1e3a5f;
+        color: #e0e0e0;
+    }
+    
+    Footer {
+        background: #1a1a2e;
+    }
+    
     #main-container {
         layout: horizontal;
     }
@@ -169,44 +178,71 @@ class RundownApp(App):
     #list-panel {
         width: 60%;
         height: 100%;
-        border: solid $primary;
+        border: tall #3a506b;
+        background: #0f0f1a;
     }
     
     #detail-panel {
         width: 40%;
         height: 100%;
-        border: solid $secondary;
-        padding: 1;
+        border: tall #3a506b;
+        background: #16162a;
+        padding: 1 2;
     }
     
     #status-bar {
         height: 1;
-        background: $primary-background;
-        color: $text;
+        background: #1a1a2e;
+        color: #a0a0a0;
         padding: 0 1;
     }
     
     #search-container {
         height: 3;
         padding: 0 1;
+        background: #0f0f1a;
     }
     
     #search-input {
-        width: 100%;
+        width: 1fr;
+        background: #1a1a2e;
+        border: tall #3a506b;
+    }
+    
+    #search-input:focus {
+        border: tall #5bc0be;
     }
     
     #filter-status {
-        width: 20;
+        width: 22;
         margin-left: 1;
+        background: #1a1a2e;
     }
     
     DataTable {
         height: 1fr;
+        background: #0f0f1a;
+    }
+    
+    DataTable > .datatable--header {
+        background: #1e3a5f;
+        color: #e0e0e0;
+        text-style: bold;
+    }
+    
+    DataTable > .datatable--cursor {
+        background: #3a506b;
+        color: #ffffff;
+    }
+    
+    DataTable > .datatable--hover {
+        background: #252545;
     }
     
     #detail-content {
         height: 1fr;
         overflow-y: auto;
+        padding: 0;
     }
     
     .detail-section {
@@ -214,51 +250,65 @@ class RundownApp(App):
     }
     
     .detail-label {
-        color: $text-muted;
+        color: #6fffe9;
     }
     
     .detail-value {
-        color: $text;
+        color: #e0e0e0;
     }
     
     .score-high {
-        color: $success;
+        color: #5bc0be;
+        text-style: bold;
     }
     
     .score-medium {
-        color: $warning;
+        color: #ffc857;
     }
     
     .score-low {
-        color: $error;
+        color: #e63946;
     }
     
     #edit-dialog {
         width: 80;
         height: auto;
         max-height: 90%;
-        background: $surface;
-        border: thick $primary;
+        background: #16162a;
+        border: thick #5bc0be;
         padding: 1 2;
     }
     
     #edit-dialog Label {
         margin-top: 1;
         margin-bottom: 0;
+        color: #6fffe9;
     }
     
     #edit-dialog Input {
         width: 100%;
+        background: #1a1a2e;
+        border: tall #3a506b;
+    }
+    
+    #edit-dialog Input:focus {
+        border: tall #5bc0be;
     }
     
     #edit-dialog TextArea {
         height: 5;
         width: 100%;
+        background: #1a1a2e;
+        border: tall #3a506b;
+    }
+    
+    #edit-dialog TextArea:focus {
+        border: tall #5bc0be;
     }
     
     #edit-title {
         text-style: bold;
-        color: $primary;
+        color: #5bc0be;
         margin-bottom: 1;
     }
     
@@ -272,17 +322,35 @@ class RundownApp(App):
         margin: 0 1;
     }
     
+    Button {
+        background: #3a506b;
+        color: #e0e0e0;
+        border: none;
+    }
+    
+    Button:hover {
+        background: #5bc0be;
+        color: #0f0f1a;
+    }
+    
+    Button.-primary {
+        background: #5bc0be;
+        color: #0f0f1a;
+        text-style: bold;
+    }
+    
     #help-dialog {
-        width: 60;
+        width: 65;
         height: auto;
-        max-height: 80%;
-        background: $surface;
-        border: thick $accent;
+        max-height: 85%;
+        background: #16162a;
+        border: thick #6fffe9;
         padding: 2;
     }
     
     #help-content {
         height: auto;
+        color: #e0e0e0;
     }
     """
     
