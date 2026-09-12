@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rundown"
+version = "0.1.0"
+description = "Local-first CLI/TUI for turning GitHub stars into actionable repository intelligence."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "rich>=13.7",
+  "textual>=0.80",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+rundown = "rundown.cli:main"
+rd = "rundown.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "config/rundown.toml", "README.md", "pyproject.toml"]

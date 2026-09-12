@@ -1,0 +1,34 @@
+[paths]
+repo_root = "./repos"
+wiki_root = "./wiki"
+database = "./data/rundown.sqlite"
+logs = "./logs"
+exports = "./exports"
+
+[github]
+use_gh_cli = true
+# Keep private starred repositories out of the local catalog unless explicitly enabled.
+include_private = false
+
+[scoring]
+preferred_languages = ["Python", "JavaScript", "TypeScript", "Go", "Rust"]
+# Add projects you want research to relate to.
+active_projects = []
+
+[execution]
+prefer_docker = true
+require_confirmation_for_unknown_commands = true
+timeout_seconds = 120
+
+[research]
+# auto tries Claude, then Gemini, then Codex. Or choose claude, gemini, or codex.
+# Each CLI uses its own configured/default model and authentication.
+provider = "auto"
+# Customize locally; do not commit private work or personal context.
+profile = "I am interested in useful software, developer tools, and automation."
+timeout_seconds = 180
+max_context_chars = 60000
+
+[tui]
+default_filter = "not_archived"
+default_sort = "starred_at"
