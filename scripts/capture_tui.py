@@ -55,6 +55,12 @@ def normalize_svg(svg: str) -> str:
     return "\n".join(line.rstrip() for line in svg.splitlines()).rstrip() + "\n"
 
 
+def _svg_diff_lines(svg: str) -> list[str]:
+    """Split rendered SVG into tags so snapshot failures remain readable in CI."""
+
+    return re.sub(r">\s*<", ">\n<", svg).splitlines(keepends=True)
+
+
 async def _wait_for_palette(app: RundownApp, pilot) -> None:
     for _ in range(100):
         await asyncio.sleep(0.01)
@@ -127,8 +133,8 @@ def _compare(captures: dict[str, str], baseline_dir: Path) -> None:
         if expected != actual:
             diff = "".join(
                 difflib.unified_diff(
-                    expected.splitlines(keepends=True),
-                    actual.splitlines(keepends=True),
+                    _svg_diff_lines(expected),
+                    _svg_diff_lines(actual),
                     fromfile=str(path),
                     tofile=f"current:{name}",
                     n=2,
@@ -191,12 +197,13 @@ def main() -> None:
     )
     args = parser.parse_args()
     captures = asyncio.run(capture_all())
+    if args.output_dir is not None:
+        # Preserve the actual render even when comparison exits with a failure.
+        _write_svgs(captures, args.output_dir)
     if args.update_baselines:
         _write_svgs(captures, args.baseline_dir)
     else:
         _compare(captures, args.baseline_dir)
-    if args.output_dir is not None:
-        _write_svgs(captures, args.output_dir)
     if args.png:
         _write_pngs(captures)
     print(f"Verified {len(captures)} deterministic TUI snapshots.")

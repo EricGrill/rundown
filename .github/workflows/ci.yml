@@ -31,7 +31,14 @@ jobs:
       - name: Typecheck
         run: python -m pyright --pythonpath "$(command -v python)"
       - name: Verify deterministic demo UI
-        run: python scripts/capture_tui.py
+        run: python scripts/capture_tui.py --output-dir artifacts/tui
+      - name: Preserve failed TUI captures
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-${{ matrix.os }}-${{ matrix.python }}
+          path: artifacts/tui/
+          if-no-files-found: ignore
 
   package:
     runs-on: ubuntu-latest
