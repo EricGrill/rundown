@@ -1,9 +1,18 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from rundown import db, execution, research, scoring, wiki
-from rundown.config import AppConfig, PathSettings, ResearchSettings, ScoringSettings
+from rundown.cards import SECTION_TITLES, record_from_saved
+from rundown.config import (
+    AppConfig,
+    CardSettings,
+    CardTemplateSettings,
+    PathSettings,
+    ResearchSettings,
+    ScoringSettings,
+)
 
 
 def make_config(tmp_path: Path) -> AppConfig:
@@ -110,6 +119,7 @@ Inference: it resembles the user's agent orchestration interests.
     assert len(logs) == 1
     assert logs[0]["pass_type"] == "Repository Understanding"
     assert logs[0]["source_fingerprint"]
+    assert record_from_saved(logs[0]["summary"], logs[0]["card_json"]).sections["what_it_is"]
     assert "Research Pass: Repository Understanding" in Path(row["wiki_path"]).read_text(
         encoding="utf-8"
     )
@@ -151,6 +161,125 @@ def test_research_cache_invalidates_when_repository_content_changes(tmp_path):
     assert logs[0]["source_fingerprint"] != logs[1]["source_fingerprint"]
 
 
+def test_research_fingerprint_tracks_content_settings_not_card_layout(tmp_path):
+    config = make_config(tmp_path)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    context = "repository context"
+    baseline = research.repository_fingerprint(config, repo_dir, context)
+
+    layout_only = replace(
+        config,
+        cards=replace(
+            config.cards,
+            default_view="research",
+            host=CardTemplateSettings(
+                sections=tuple(reversed(config.cards.host.sections)),
+                word_limit=25,
+            ),
+        ),
+    )
+    audience_change = replace(
+        config,
+        cards=CardSettings(audience="Engineering leaders preparing a show"),
+    )
+
+    assert research.repository_fingerprint(layout_only, repo_dir, context) == baseline
+    assert research.repository_fingerprint(audience_change, repo_dir, context) != baseline
+
+    with patch.object(research, "SCHEMA_VERSION", research.SCHEMA_VERSION + 1):
+        schema_change = research.repository_fingerprint(config, repo_dir, context)
+    assert schema_change != baseline
+
+
+def test_forced_research_bypasses_an_unchanged_cache(tmp_path):
+    config = make_config(tmp_path)
+    config.ensure_directories()
+    repo_dir = config.repo_root / "owner" / "project"
+    repo_dir.mkdir(parents=True)
+    (repo_dir / "README.md").write_text("# Project", encoding="utf-8")
+    generated = """## What This Is
+A project.
+
+## Explain It Like I'm Seven
+A helper.
+
+## Why Someone Would Use It
+It helps.
+
+## Why It Might Matter to You
+It may fit.
+
+## Why It May Have Caught Your Eye
+Inference: automation."""
+
+    with (
+        patch(
+            "rundown.research.generate_repository_research",
+            return_value=generated,
+        ) as generate,
+        db.session(config.database_path) as conn,
+    ):
+        db.init_db(conn)
+        add_repo(conn, local_path=repo_dir)
+        first_status, _ = research.run_repository_research(config, conn, "owner/project")
+        forced_status, _ = research.run_repository_research(
+            config,
+            conn,
+            "owner/project",
+            force=True,
+        )
+        logs = conn.execute("SELECT * FROM research_logs ORDER BY id").fetchall()
+
+    assert first_status == "success"
+    assert forced_status == "success"
+    assert generate.call_count == 2
+    assert len(logs) == 2
+    assert all(log["card_json"] for log in logs)
+
+
+def test_structured_research_is_saved_as_markdown_and_card_json(tmp_path):
+    config = make_config(tmp_path)
+    config.ensure_directories()
+    repo_dir = config.repo_root / "owner" / "project"
+    repo_dir.mkdir(parents=True)
+    (repo_dir / "README.md").write_text("# Project", encoding="utf-8")
+    provider_output = json.dumps(
+        {
+            "schema_version": 1,
+            "sections": {
+                section_id: (
+                    f"Content for {section_id}."
+                    if section_id in tuple(SECTION_TITLES)[:5]
+                    else None
+                )
+                for section_id in SECTION_TITLES
+            },
+        }
+    )
+
+    with (
+        patch(
+            "rundown.research.generate_repository_research",
+            return_value=provider_output,
+        ),
+        db.session(config.database_path) as conn,
+    ):
+        db.init_db(conn)
+        add_repo(conn, local_path=repo_dir)
+        status, summary = research.run_repository_research(config, conn, "owner/project")
+        row = db.latest_successful_research(
+            conn,
+            db.get_repo(conn, "owner/project")["id"],
+        )
+
+    assert status == "success"
+    assert summary.startswith("## What This Is")
+    assert not summary.lstrip().startswith("{")
+    assert row["summary"] == summary
+    assert json.loads(row["card_json"])["sections"]["what_it_is"] == "Content for what_it_is."
+
+
 def test_research_prompt_starts_with_meaning_and_includes_personal_context(tmp_path):
     config = make_config(tmp_path)
     config = replace(
@@ -181,6 +310,11 @@ def test_research_prompt_starts_with_meaning_and_includes_personal_context(tmp_p
     assert "Example App" in prompt
     assert "Developer Tools" in prompt
     assert "untrusted source material" in prompt
+    assert '"schema_version"' in prompt
+    assert '"what_it_is"' in prompt
+    assert "Return one JSON object only" in prompt
+    assert "Not rehearsed" in prompt
+    assert "generated source references, not verified facts" in prompt
 
 
 def test_generate_repository_research_uses_available_agent_without_tools(tmp_path):

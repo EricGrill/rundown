@@ -32,3 +32,18 @@ max_context_chars = 60000
 [tui]
 default_filter = "not_archived"
 default_sort = "starred_at"
+
+[cards]
+# Each repository remembers the view you choose with v.
+default_view = "host"
+audience = "Developers exploring useful repositories"
+tone = "Plain, concise, conversational"
+duration_seconds = 90
+
+[cards.host]
+sections = ["hook", "what_it_is", "talking_points", "why_now", "demo", "risks", "recommendation", "sources"]
+word_limit = 60
+
+[cards.research]
+sections = ["what_it_is", "analogy", "use_cases", "personal_fit", "interest", "how_it_works", "practical_uses", "strengths", "risks", "setup", "maturity", "questions", "recommendation", "sources"]
+word_limit = 120

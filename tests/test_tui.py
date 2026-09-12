@@ -2,9 +2,10 @@ import asyncio
 import threading
 from unittest.mock import patch
 
+import pytest
 from textual.command import CommandList, CommandPalette
 from textual.containers import VerticalScroll
-from textual.widgets import DataTable, Input, Markdown, Static
+from textual.widgets import DataTable, Input, Markdown, Select, Static
 
 from rundown import db
 from rundown.config import AppConfig, GithubSettings, PathSettings
@@ -248,6 +249,65 @@ def test_find_read_and_escape_move_focus_without_losing_context(tmp_path):
     asyncio.run(run_test())
 
 
+@pytest.mark.parametrize("size", [(80, 30), (140, 40)])
+@pytest.mark.parametrize("selector_id,steps,target", [
+    ("category", 0, "repos"),
+    ("card-view", 0, "reader"),
+    ("card-view", 1, "reader"),
+])
+def test_dropdown_choice_returns_focus_so_enter_reads(tmp_path, size, selector_id, steps, target):
+    config = AppConfig(root=tmp_path)
+    with db.session(config.database_path) as conn:
+        db.init_db(conn)
+        db.upsert_repo(conn, db.RepoInput(
+            "owner/project", "owner", "project", "https://github.com/owner/project",
+        ))
+
+    async def run_test():
+        app = RundownApp(config, fetch_starred=list)
+        async with app.run_test(size=size) as pilot:
+            await app.workers.wait_for_complete()
+            selector = app.query_one(f"#{selector_id}", Select)
+            selector.focus()
+            await pilot.press("space", *(["down"] * steps), "enter")
+            await pilot.pause()
+            assert not selector.expanded
+            assert app.query_one(f"#{target}").has_focus
+
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.query_one("#reader").has_focus
+            assert app.detail_full_name == "owner/project"
+            assert all(not select.expanded for select in app.query(Select))
+            assert len(app.screen_stack) == 1
+
+    asyncio.run(run_test())
+
+
+def test_dropdown_dismissal_preserves_deliberate_focus_changes(tmp_path):
+    config = AppConfig(root=tmp_path)
+
+    async def run_test():
+        app = RundownApp(config, fetch_starred=list)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            selector = app.query_one("#category", Select)
+            await pilot.press("f", "escape")
+            await pilot.pause()
+            assert not selector.expanded
+            assert app.query_one("#repos").has_focus
+
+            await pilot.press("f")
+            await pilot.click("#search")
+            await pilot.pause()
+            assert not selector.expanded
+            assert app.query_one("#search").has_focus
+            await pilot.press(*"project")
+            assert app.query_one("#search", Input).value == "project"
+
+    asyncio.run(run_test())
+
+
 def test_removed_action_letters_do_not_trigger_repo_operations(tmp_path):
     config = AppConfig(
         root=tmp_path,
@@ -324,10 +384,14 @@ def test_command_palette_is_curated_filterable_and_invokes_find(tmp_path):
                 "Classify starred repositories",
                 "Filter by category",
                 "Find repositories",
+                "Mark for presentation",
                 "Open repository on GitHub",
                 "Quit",
                 "Read selected repository",
                 "Research selected repository",
+                "Refresh selected research",
+                "Switch research card view",
+                "Edit host notes",
                 "Sync GitHub stars",
             }
 

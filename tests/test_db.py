@@ -105,3 +105,141 @@ def test_init_db_adds_research_fingerprint_to_existing_database(tmp_path):
         }
 
     assert "source_fingerprint" in columns
+
+
+def test_init_db_adds_card_storage_to_existing_database(tmp_path):
+    database = tmp_path / "app.sqlite"
+    with db.session(database) as conn:
+        legacy_schema = db.SCHEMA.replace("    card_json TEXT,\n", "").split(
+            "CREATE TABLE IF NOT EXISTS repo_cards"
+        )[0]
+        conn.executescript(legacy_schema)
+
+        db.init_db(conn)
+        research_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(research_logs)")
+        }
+        card_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(repo_cards)")
+        }
+
+    assert "card_json" in research_columns
+    assert card_columns == {"repo_id", "view", "host_notes"}
+
+
+def test_repo_card_partial_upserts_preserve_other_field(tmp_path):
+    database = tmp_path / "app.sqlite"
+    with db.session(database) as conn:
+        db.init_db(conn)
+        repo_id = db.upsert_repo(
+            conn,
+            db.RepoInput("a/one", "a", "one", "https://github.com/a/one"),
+        )
+
+        db.save_repo_card(conn, repo_id, host_notes="Opening angle")
+        after_notes_only = dict(db.get_repo_card(conn, repo_id))
+        db.save_repo_card(conn, repo_id, view="research")
+        after_view = dict(db.get_repo_card(conn, repo_id))
+        db.save_repo_card(conn, repo_id, host_notes="Revised notes")
+        after_notes = dict(db.get_repo_card(conn, repo_id))
+
+    assert after_notes_only == {
+        "repo_id": repo_id,
+        "view": None,
+        "host_notes": "Opening angle",
+    }
+    assert after_view == {
+        "repo_id": repo_id,
+        "view": "research",
+        "host_notes": "Opening angle",
+    }
+    assert after_notes == {
+        "repo_id": repo_id,
+        "view": "research",
+        "host_notes": "Revised notes",
+    }
+
+
+def test_notes_only_ignores_legacy_view_default(tmp_path):
+    database = tmp_path / "app.sqlite"
+    with db.session(database) as conn:
+        conn.executescript(db.SCHEMA.split("CREATE TABLE IF NOT EXISTS repo_cards")[0])
+        conn.execute(
+            """
+            CREATE TABLE repo_cards (
+                repo_id INTEGER PRIMARY KEY,
+                view TEXT DEFAULT 'host',
+                host_notes TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(repo_id) REFERENCES repos(id)
+            )
+            """
+        )
+        db.init_db(conn)
+        repo_id = db.upsert_repo(
+            conn,
+            db.RepoInput("a/one", "a", "one", "https://github.com/a/one"),
+        )
+
+        db.save_repo_card(conn, repo_id, host_notes="Use configured default view")
+        saved = dict(db.get_repo_card(conn, repo_id))
+
+    assert saved["view"] is None
+    assert saved["host_notes"] == "Use configured default view"
+
+
+def test_repo_card_supports_prior_not_null_view_schema(tmp_path):
+    database = tmp_path / "app.sqlite"
+    with db.session(database) as conn:
+        conn.executescript(db.SCHEMA.split("CREATE TABLE IF NOT EXISTS repo_cards")[0])
+        conn.execute(
+            """
+            CREATE TABLE repo_cards (
+                repo_id INTEGER PRIMARY KEY,
+                view TEXT NOT NULL DEFAULT 'host',
+                host_notes TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY(repo_id) REFERENCES repos(id)
+            )
+            """
+        )
+        db.init_db(conn)
+        inherited_repo_id = db.upsert_repo(
+            conn,
+            db.RepoInput("a/one", "a", "one", "https://github.com/a/one"),
+        )
+        selected_repo_id = db.upsert_repo(
+            conn,
+            db.RepoInput("b/two", "b", "two", "https://github.com/b/two"),
+        )
+
+        db.save_repo_card(conn, inherited_repo_id, host_notes="Legacy initial note")
+        db.save_repo_card(
+            conn,
+            selected_repo_id,
+            view="research",
+            host_notes="Research view note",
+        )
+        db.save_repo_card(conn, selected_repo_id, host_notes="Revised research note")
+        inherited = dict(db.get_repo_card(conn, inherited_repo_id))
+        selected = dict(db.get_repo_card(conn, selected_repo_id))
+
+    assert inherited["view"] == "host"
+    assert inherited["host_notes"] == "Legacy initial note"
+    assert selected["view"] == "research"
+    assert selected["host_notes"] == "Revised research note"
+
+
+def test_repo_card_rejects_unknown_view(tmp_path):
+    database = tmp_path / "app.sqlite"
+    with db.session(database) as conn:
+        db.init_db(conn)
+        repo_id = db.upsert_repo(
+            conn,
+            db.RepoInput("a/one", "a", "one", "https://github.com/a/one"),
+        )
+
+        try:
+            db.save_repo_card(conn, repo_id, view="slides")
+        except ValueError as exc:
+            assert "host" in str(exc) and "research" in str(exc)
+        else:
+            raise AssertionError("invalid card view was accepted")

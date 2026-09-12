@@ -460,7 +460,7 @@ def export_repos(
 ) -> None:
     """Export presentation-ready Markdown for repositories marked present or shortlist."""
     cfg = _config(config)
-    decisions = decision if decision else list(export.EXPORT_DECISIONS)
+    decisions: list[str] = decision if decision else list(export.EXPORT_DECISIONS)
     output_path = output if output else cfg.exports_root / "rundown-export.md"
     with _conn(cfg) as conn:
         db.init_db(conn)

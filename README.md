@@ -6,26 +6,7 @@
 
 Rundown syncs your starred repositories, organizes them into five categories, and uses Claude, Gemini, or Codex CLIs to generate research summaries—all stored locally in SQLite and Markdown.
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  Rundown                                        Browse · Research · Read     │
-├───────────────────────────────────────────┬──────────────────────────────────┤
-│  Find a repository…                       │ astral-sh/uv                     │
-│  ┌─────────────────────────────────────┐  │                                  │
-│  │ All categories               ▾      │  │ An extremely fast Python package │
-│  └─────────────────────────────────────┘  │ and project manager, written in  │
-│  42 of 128 repositories · newest first    │ Rust.                            │
-│  ─────────────────────────────────────────│                                  │
-│  astral-sh/uv              Saved          │ Added: 2026-09-01 · Python       │
-│  pydantic/pydantic         Saved          │ Category: Developer Tools        │
-│  textualize/textual        Not researched │ Local copy: Cloned               │
-│  charmbracelet/bubbletea   Saved          │                                  │
-│  anthropics/anthropic-sdk  Saved          │ Saved research · 2026-09-10      │
-│  langchain-ai/langchain    Not researched │                                  │
-├───────────────────────────────────────────┴──────────────────────────────────┤
-│ Select a repo · r researches · Enter reads · Ctrl+P opens the menu           │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+
 
 ## Features
 
@@ -35,6 +16,22 @@ Rundown syncs your starred repositories, organizes them into five categories, an
 - **Browse and filter** in a keyboard-driven TUI
 - **Export** repositories marked for presentation to Markdown
 - **Local-first**: all data stays on your machine
+
+## TUI preview
+
+Captured from the running TUI with a sample catalog of public repositories.
+
+Browse repositories and read their details side by side:
+
+![Rundown TUI showing a repository catalog with lazygit selected and its details in the reader](docs/images/tui-catalog.png)
+
+Press `/` to filter repositories by name or description:
+
+![Rundown TUI filtering the catalog to langchain and showing its repository details](docs/images/tui-search.png)
+
+Press `Ctrl+P` to open the searchable action menu:
+
+![Rundown command menu with actions for research, reading, filtering, classification, and syncing](docs/images/tui-menu.png)
 
 ## Requirements
 
@@ -86,6 +83,10 @@ rd export
 | `↑` / `↓` | Select a repository |
 | `Enter` | Read its details and saved research |
 | `r` | Research it; cloning happens automatically when needed |
+| `Shift+R` | Refresh research, bypassing the saved result |
+| `v` | Switch between Host brief and Research card |
+| `p` | Toggle whether this repository is marked for presentation |
+| `n` | Edit host notes; `Ctrl+S` saves and `Esc` cancels |
 | `/` | Search names and descriptions |
 | `f` | Filter by category |
 | `Ctrl+P` | Open the full action menu |
@@ -93,6 +94,44 @@ rd export
 | `q` | Quit |
 
 The five categories are **AI & Agents**, **Developer Tools**, **Infrastructure & Security**, **Knowledge & Learning**, and **Apps & Business**.
+
+## Research cards
+
+Choose **Host brief** for a short show segment or **Research card** for deeper evaluation. Press `v` or use the view selector. The chosen view is remembered for each repository, and switching uses saved research without calling an AI provider.
+
+Sections have distinct headings, Markdown bullets, and short previews. Expand **Read full section** for a long finding, or **Full research** to see the complete original report. Use `Tab` to reach disclosure controls and `Enter` to toggle them. Older Markdown reports remain readable; unavailable fields show **Unknown**. `Shift+R` generates a fresh report when you want new show details.
+
+The screenshots below show the running TUI with illustrative research about Rundown:
+
+![Rundown Host brief with a hook, talking points, and a segment time target](docs/images/tui-host-brief.png)
+
+![Rundown Research card with structured findings and expandable detail](docs/images/tui-research-card.png)
+
+**Host notes are yours.** Press `n` to edit them, `Ctrl+S` to save, or `Esc` to cancel. Notes are stored separately from generated research and survive syncs, view changes, and research refreshes. Demo ideas are labeled **not rehearsed**; generated source references are not independent verification.
+
+Customize your show and layout in `config/rundown.local.toml`:
+
+```toml
+[cards]
+default_view = "host" # host or research
+audience = "Developers exploring useful repositories"
+tone = "Plain, concise, conversational"
+duration_seconds = 90 # target, not measured runtime
+
+[cards.host]
+sections = ["hook", "what_it_is", "talking_points", "demo", "risks", "recommendation", "sources"]
+word_limit = 60 # per-section preview; full text remains available
+
+[cards.research]
+sections = ["what_it_is", "use_cases", "how_it_works", "strengths", "risks", "setup", "questions", "recommendation", "sources"]
+word_limit = 120
+```
+
+Start with `rd tui --config config/rundown.local.toml`. Section lists set both visibility and order. Changing view, section order, or preview length only changes presentation. Audience, tone, and duration affect future generated content; use `Shift+R` to refresh an existing report with those settings. Per-repository view choices override `default_view`.
+
+Available sections: `what_it_is`, `analogy`, `use_cases`, `personal_fit`, `interest`, `how_it_works`, `practical_uses`, `strengths`, `risks`, `setup`, `maturity`, `questions`, `recommendation`, `hook`, `why_now`, `talking_points`, `demo`, and `sources`. Lists must be nonempty, contain unique known IDs, and use preview limits of 10–1,000 words. Segment targets range from 15 to 3,600 seconds.
+
+New research is validated as a versioned record of named fields and also exported as Markdown. Existing research history is retained. Card preferences and host notes live in the same local SQLite catalog; host notes are not sent to the research provider.
 
 ## Research repositories
 
@@ -130,7 +169,7 @@ rd mark astral-sh/uv present
 rd mark pydantic/pydantic shortlist
 ```
 
-Add optional card fields for richer exports:
+Add optional card fields for richer exports. These manually authored export fields are separate from generated research cards and TUI host notes:
 
 ```bash
 rd card astral-sh/uv \

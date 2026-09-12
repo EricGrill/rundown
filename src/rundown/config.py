@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-import tomllib
 from typing import Any
+
+from .cards import HOST_SECTIONS, RESEARCH_SECTIONS, SECTION_TITLES
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,68 @@ class TuiSettings:
 
 
 @dataclass(frozen=True)
+class CardTemplateSettings:
+    sections: tuple[str, ...]
+    word_limit: int
+
+    def __post_init__(self) -> None:
+        if not self.sections:
+            raise ValueError("card template sections must not be empty")
+        if len(set(self.sections)) != len(self.sections):
+            raise ValueError("card template sections must be unique")
+        unknown = set(self.sections) - set(SECTION_TITLES)
+        if unknown:
+            raise ValueError(f"unknown card sections: {', '.join(sorted(unknown))}")
+        if isinstance(self.word_limit, bool) or not isinstance(self.word_limit, int):
+            # Config validation consistently reports invalid settings as values.
+            raise ValueError("card template word_limit must be an integer")  # noqa: TRY004
+        if not 10 <= self.word_limit <= 1000:
+            raise ValueError("card template word_limit must be between 10 and 1000")
+
+
+def _default_host_card() -> CardTemplateSettings:
+    return CardTemplateSettings(sections=HOST_SECTIONS, word_limit=60)
+
+
+def _default_research_card() -> CardTemplateSettings:
+    return CardTemplateSettings(sections=RESEARCH_SECTIONS, word_limit=120)
+
+
+@dataclass(frozen=True)
+class CardSettings:
+    default_view: str = "host"
+    audience: str = "Developers exploring useful repositories"
+    tone: str = "Plain, concise, conversational"
+    duration_seconds: int = 90
+    host: CardTemplateSettings = field(default_factory=_default_host_card)
+    research: CardTemplateSettings = field(default_factory=_default_research_card)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.default_view, str) or self.default_view not in {
+            "host",
+            "research",
+        }:
+            raise ValueError("cards.default_view must be 'host' or 'research'")
+        for name, value in (("audience", self.audience), ("tone", self.tone)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"cards.{name} must be a nonblank string")
+        if isinstance(self.duration_seconds, bool) or not isinstance(
+            self.duration_seconds, int
+        ):
+            # Config validation consistently reports invalid settings as values.
+            raise ValueError("cards.duration_seconds must be an integer")  # noqa: TRY004
+        if not 15 <= self.duration_seconds <= 3600:
+            raise ValueError("cards.duration_seconds must be between 15 and 3600")
+        if not isinstance(self.host, CardTemplateSettings) or not isinstance(
+            self.research, CardTemplateSettings
+        ):
+            # Config validation consistently reports invalid settings as values.
+            raise ValueError(  # noqa: TRY004
+                "cards.host and cards.research must be card templates"
+            )
+
+
+@dataclass(frozen=True)
 class AppConfig:
     root: Path
     paths: PathSettings = field(default_factory=PathSettings)
@@ -61,6 +125,7 @@ class AppConfig:
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     research: ResearchSettings = field(default_factory=ResearchSettings)
     tui: TuiSettings = field(default_factory=TuiSettings)
+    cards: CardSettings = field(default_factory=CardSettings)
 
     def resolve(self, path: Path) -> Path:
         return path if path.is_absolute() else (self.root / path).resolve()
@@ -115,6 +180,57 @@ def _table(data: dict[str, object], name: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _card_template(
+    data: object,
+    *,
+    name: str,
+    default: CardTemplateSettings,
+) -> CardTemplateSettings:
+    if data is None:
+        return default
+    if not isinstance(data, dict):
+        # TOML shape failures use the same error type as invalid field values.
+        raise ValueError(f"cards.{name} must be a table")  # noqa: TRY004
+    unknown = set(data) - {"sections", "word_limit"}
+    if unknown:
+        raise ValueError(f"unknown cards.{name} settings: {', '.join(sorted(unknown))}")
+    if "sections" in data:
+        raw_sections = data["sections"]
+        if not isinstance(raw_sections, list) or any(
+            not isinstance(item, str) for item in raw_sections
+        ):
+            raise ValueError(f"cards.{name}.sections must be an array of strings")
+        sections = tuple(raw_sections)
+    else:
+        sections = default.sections
+    return CardTemplateSettings(
+        sections=sections,
+        word_limit=data.get("word_limit", default.word_limit),
+    )
+
+
+def _card_settings(data: dict[str, object]) -> CardSettings:
+    raw = data.get("cards")
+    if raw is None:
+        return CardSettings()
+    if not isinstance(raw, dict):
+        # TOML shape failures use the same error type as invalid field values.
+        raise ValueError("cards must be a table")  # noqa: TRY004
+    known = {"default_view", "audience", "tone", "duration_seconds", "host", "research"}
+    unknown = set(raw) - known
+    if unknown:
+        raise ValueError(f"unknown cards settings: {', '.join(sorted(unknown))}")
+    defaults = CardSettings()
+    return CardSettings(
+        default_view=raw.get("default_view", defaults.default_view),
+        audience=raw.get("audience", defaults.audience),
+        tone=raw.get("tone", defaults.tone),
+        duration_seconds=raw.get("duration_seconds", defaults.duration_seconds),
+        host=_card_template(raw.get("host"), name="host", default=defaults.host),
+        research=_card_template(raw.get("research"), name="research", default=defaults.research),
+    )
+
+
 def load_config(config_path: Path | None = None) -> AppConfig:
     path = config_path or Path("config/rundown.toml")
     root = path.parent.parent.resolve() if path.exists() else Path.cwd().resolve()
@@ -156,4 +272,5 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             default_filter=str(tui.get("default_filter", "not_archived")),
             default_sort=str(tui.get("default_sort", "starred_at")),
         ),
+        cards=_card_settings(data),
     )

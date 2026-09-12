@@ -1,13 +1,23 @@
+import json
 import subprocess
 from unittest.mock import patch
 
 import pytest
 
 from rundown import research
+from rundown.cards import SECTION_TITLES
 from rundown.config import AppConfig, ResearchSettings, load_config
 
-
 REPORT = "\n\n".join(f"{heading}\nResearch content." for heading in research.REQUIRED_SECTIONS)
+JSON_REPORT = json.dumps(
+    {
+        "schema_version": 1,
+        "sections": {
+            section_id: ("Research content." if section_id in tuple(SECTION_TITLES)[:5] else None)
+            for section_id in SECTION_TITLES
+        },
+    }
+)
 
 
 def test_codex_provider_loads_and_returns_final_report(tmp_path):
@@ -59,6 +69,21 @@ def test_auto_uses_codex_when_other_clis_are_not_installed(tmp_path):
         assert research.generate_repository_research(AppConfig(root=tmp_path), "prompt", tmp_path) == REPORT
     run.assert_called_once()
     assert run.call_args.args[0][0] == "codex"
+
+
+def test_provider_accepts_versioned_json_and_returns_original_text(tmp_path):
+    config = AppConfig(root=tmp_path, research=ResearchSettings(provider="codex"))
+    with (
+        patch.object(research.shutil, "which", return_value="/bin/codex"),
+        patch.object(
+            research.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, JSON_REPORT, ""),
+        ),
+    ):
+        output = research.generate_repository_research(config, "prompt", tmp_path)
+
+    assert output == JSON_REPORT
 
 
 @pytest.mark.parametrize("failure, message", [

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import sqlite3
 from typing import Any, Iterator
-
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -59,6 +58,14 @@ CREATE TABLE IF NOT EXISTS research_logs (
     status TEXT,
     error TEXT,
     source_fingerprint TEXT,
+    card_json TEXT,
+    FOREIGN KEY(repo_id) REFERENCES repos(id)
+);
+
+CREATE TABLE IF NOT EXISTS repo_cards (
+    repo_id INTEGER PRIMARY KEY,
+    view TEXT,
+    host_notes TEXT NOT NULL DEFAULT '',
     FOREIGN KEY(repo_id) REFERENCES repos(id)
 );
 
@@ -141,6 +148,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     for card_field in ("hook", "who_for", "problem", "why_now", "demo_path"):
         if card_field not in columns:
             conn.execute(f"ALTER TABLE repos ADD COLUMN {card_field} TEXT")
+    if "card_json" not in research_columns:
+        conn.execute("ALTER TABLE research_logs ADD COLUMN card_json TEXT")
 
 
 def upsert_repo(conn: sqlite3.Connection, repo: RepoInput) -> int:
@@ -238,14 +247,15 @@ def insert_research_log(
     error: str | None = None,
     agent_name: str = "rundown",
     source_fingerprint: str | None = None,
+    card_json: str | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT INTO research_logs (
             repo_id, pass_type, timestamp, output_path, summary, agent_name, status, error,
-            source_fingerprint
+            source_fingerprint, card_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             repo_id,
@@ -257,8 +267,68 @@ def insert_research_log(
             status,
             error,
             source_fingerprint,
+            card_json,
         ),
     )
+
+
+def get_repo_card(conn: sqlite3.Connection, repo_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM repo_cards WHERE repo_id = ?",
+        (repo_id,),
+    ).fetchone()
+
+
+def save_repo_card(
+    conn: sqlite3.Connection,
+    repo_id: int,
+    *,
+    view: str | None = None,
+    host_notes: str | None = None,
+) -> None:
+    if view is not None and view not in {"host", "research"}:
+        raise ValueError("Card view must be 'host' or 'research'")
+    if view is None and host_notes is None:
+        return
+    if view is not None and host_notes is not None:
+        conn.execute(
+            """
+            INSERT INTO repo_cards (repo_id, view, host_notes)
+            VALUES (?, ?, ?)
+            ON CONFLICT(repo_id) DO UPDATE SET
+                view = excluded.view,
+                host_notes = excluded.host_notes
+            """,
+            (repo_id, view, host_notes),
+        )
+    elif view is not None:
+        conn.execute(
+            """
+            INSERT INTO repo_cards (repo_id, view)
+            VALUES (?, ?)
+            ON CONFLICT(repo_id) DO UPDATE SET view = excluded.view
+            """,
+            (repo_id, view),
+        )
+    else:
+        updated = conn.execute(
+            "UPDATE repo_cards SET host_notes = ? WHERE repo_id = ?",
+            (host_notes, repo_id),
+        )
+        if updated.rowcount:
+            return
+        view_column = next(
+            row for row in conn.execute("PRAGMA table_info(repo_cards)") if row["name"] == "view"
+        )
+        initial_view = "host" if view_column["notnull"] else None
+        conn.execute(
+            """
+            INSERT INTO repo_cards (repo_id, view, host_notes)
+            VALUES (?, ?, ?)
+            ON CONFLICT(repo_id) DO UPDATE SET host_notes = excluded.host_notes
+            """,
+            (repo_id, initial_view, host_notes),
+        )
 
 
 def latest_successful_research(
