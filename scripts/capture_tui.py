@@ -18,10 +18,11 @@ os.environ.pop("NO_COLOR", None)
 
 from textual.command import CommandList
 from textual.containers import VerticalScroll
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import DataTable, Input, Static, TextArea
 
 from rundown.demo import demo_environment
 from rundown.tui import RundownApp
+from rundown.startup import WelcomeApp
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE_DIR = ROOT / "tests" / "snapshots" / "tui"
@@ -31,8 +32,16 @@ README_IMAGES = {
     "menu": "tui-menu.png",
     "host": "tui-host-brief.png",
     "research": "tui-research-card.png",
+    "prepare": "tui-prepare.png",
+    "export": "tui-export.png",
+    "template-modal": "tui-template.png",
+    "welcome": "tui-welcome.png",
 }
 CASES: tuple[tuple[str, tuple[int, int], tuple[str, ...]], ...] = (
+    ("prepare", (140, 36), ("e",)),
+    ("compact-prepare", (80, 24), ("e",)),
+    ("export", (140, 36), ("x",)),
+    ("compact-export", (80, 24), ("x",)),
     ("catalog", (140, 30), ()),
     ("search", (140, 30), ("/", "python")),
     ("menu", (140, 30), ("ctrl+p",)),
@@ -102,13 +111,17 @@ async def _capture_case(size: tuple[int, int], keys: tuple[str, ...]) -> str:
                     await _wait_for_palette(app, pilot)
                 await pilot.pause()
 
+            if app.screen.query("#export-path"):
+                app.screen.query_one("#export-path", Input).value = "/tmp/rundown-demo/exports/rundown-export.md"
             # Input cursor blink is wall-clock driven, so freeze it for captures.
             for screen in app.screen_stack:
                 for field in screen.query(Input):
                     field.cursor_blink = False
+                for editor in screen.query(TextArea):
+                    editor.cursor_blink = False
             await pilot.pause()
 
-            for selector in ("#template-dialog", "#catalog-dialog", "#jobs-dialog"):
+            for selector in ("#template-dialog", "#catalog-dialog", "#jobs-dialog", "#card-edit-dialog", "#export-dialog"):
                 dialogs = app.screen.query(selector)
                 if dialogs:
                     dialog = dialogs.first()
@@ -123,6 +136,10 @@ async def capture_all() -> dict[str, str]:
     captures: dict[str, str] = {}
     for name, size, keys in CASES:
         captures[name] = await _capture_case(size, keys)
+    welcome = WelcomeApp()
+    async with welcome.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        captures["welcome"] = normalize_svg(welcome.export_screenshot())
     return captures
 
 
