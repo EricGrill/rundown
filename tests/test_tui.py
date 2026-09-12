@@ -374,6 +374,9 @@ def test_command_palette_is_curated_filterable_and_invokes_find(tmp_path):
     async def run_test():
         app = RundownApp(config, fetch_starred=lambda: [])
         async with app.run_test(size=(140, 35)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert not app.sync_in_progress
             await pilot.press("ctrl+p")
             command_list = await wait_for_palette_results(app, pilot)
             prompts = {

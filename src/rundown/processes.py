@@ -5,7 +5,7 @@ import os
 import signal
 import subprocess
 from threading import Event
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 
 
@@ -19,10 +19,11 @@ def check_cancelled(cancel_event: Event | None) -> None:
 
 
 def _terminate(process: subprocess.Popen) -> None:
+    grace_deadline = monotonic() + 0.5
     if os.name == "posix":
         try:
             os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
     elif process.poll() is None:
         process.terminate()
@@ -32,11 +33,20 @@ def _terminate(process: subprocess.Popen) -> None:
         pass
     if os.name == "posix":
         # The group leader can exit on TERM while a descendant that redirected
-        # its stdio remains alive. Always clear the group, even when communicate
-        # observed the leader's quick exit instead of timing out.
+        # its stdio remains alive. Give every descendant the full TERM grace
+        # period even when communicate observed the leader's quick exit.
+        while True:
+            try:
+                os.killpg(process.pid, 0)
+            except (ProcessLookupError, PermissionError):
+                break
+            remaining = grace_deadline - monotonic()
+            if remaining <= 0:
+                break
+            sleep(min(0.01, remaining))
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
     elif process.poll() is None:
         try:

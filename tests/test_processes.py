@@ -44,7 +44,7 @@ def test_cancellation_reaches_child_process_group(tmp_path):
     cancelled = threading.Event()
     child_code = (
         "import signal,sys,time; from pathlib import Path; "
-        "signal.signal(signal.SIGTERM, lambda *_: (Path(sys.argv[2]).touch(), sys.exit(0))); "
+        "signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.15), Path(sys.argv[2]).touch(), sys.exit(0))); "
         "Path(sys.argv[1]).touch(); time.sleep(30)"
     )
     parent_code = (
@@ -104,6 +104,7 @@ def test_cancellation_kills_term_ignoring_child_after_parent_exits(tmp_path):
     trigger = threading.Thread(target=cancel_when_ready)
     trigger.start()
     child_pid = None
+    started = time.monotonic()
     try:
         with pytest.raises(OperationCancelled):
             run_command(
@@ -120,6 +121,7 @@ def test_cancellation_kills_term_ignoring_child_after_parent_exits(tmp_path):
             )
         trigger.join(timeout=1)
         assert ready.exists()
+        assert time.monotonic() - started >= 0.45
         child_pid = int(pid_path.read_text())
 
         deadline = time.monotonic() + 2

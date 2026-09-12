@@ -18,7 +18,7 @@ os.environ.pop("NO_COLOR", None)
 
 from textual.command import CommandList
 from textual.containers import VerticalScroll
-from textual.widgets import DataTable, Static
+from textual.widgets import DataTable, Input, Static
 
 from rundown.demo import demo_environment
 from rundown.tui import RundownApp
@@ -73,6 +73,7 @@ async def _capture_case(size: tuple[int, int], keys: tuple[str, ...]) -> str:
             demo_mode=True,
         )
         async with app.run_test(size=size) as pilot:
+            await app.workers.wait_for_complete()
             await pilot.pause()
             table = app.query_one("#repos", DataTable)
             reader = app.query_one("#reader", VerticalScroll)
@@ -90,6 +91,12 @@ async def _capture_case(size: tuple[int, int], keys: tuple[str, ...]) -> str:
                 if key == "ctrl+p":
                     await _wait_for_palette(app, pilot)
                 await pilot.pause()
+
+            # Input cursor blink is wall-clock driven, so freeze it for captures.
+            for screen in app.screen_stack:
+                for field in screen.query(Input):
+                    field.cursor_blink = False
+            await pilot.pause()
 
             for selector in ("#template-dialog", "#catalog-dialog", "#jobs-dialog"):
                 dialogs = app.screen.query(selector)
