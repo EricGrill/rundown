@@ -81,6 +81,10 @@ async def _capture_case(size: tuple[int, int], keys: tuple[str, ...]) -> str:
         async with app.run_test(size=size) as pilot:
             await app.workers.wait_for_complete()
             await pilot.pause()
+            # The app refreshes this label on a wall-clock timer. Set the same
+            # state explicitly so capture speed can't change the screenshot.
+            app.update_job_summary()
+            await pilot.pause()
             table = app.query_one("#repos", DataTable)
             reader = app.query_one("#reader", VerticalScroll)
             status = app.query_one("#status", Static)
