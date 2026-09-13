@@ -28,14 +28,16 @@ from .demo import demo_environment
 from .doctor import run_doctor
 from .config import AppConfig, load_config
 from .tui import RundownApp
-from . import search_cli
+from . import search_cli, inspect_cli
 from .agent_catalog import catalog_repositories
-from .agent_io import load_agent_config, read_catalog, run_command
+from .agent_io import AgentError, emit, load_agent_config, read_catalog, run_command
+from .processes import OperationCancelled
 
 
 app = typer.Typer(help="Browse → Read → Prepare → Export. Run rd with no command to open Rundown.", invoke_without_command=True)
 console = Console()
 search_cli.register(app)
+inspect_cli.register(app)
 
 
 class RepoDecision(str, Enum):
@@ -154,21 +156,50 @@ def wiki_alias(config: Annotated[Path | None, typer.Option("--config", "-c")] = 
 def research_repo(
     full_name: str,
     config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Print structured research outcome.")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Refresh even when saved research matches.")] = False,
 ) -> None:
-    cfg = _config(config)
-    cancel_event = Event()
-    try:
-        with _conn(cfg) as conn:
-            db.init_db(conn)
-            status, summary = research_workflow.research_repository(
-                cfg, conn, full_name, cancel_event=cancel_event
-            )
-    except KeyboardInterrupt:
-        cancel_event.set()
-        console.print("Research interrupted.")
-        raise typer.Exit(code=130) from None
-    console.print(f"Research status: {status}")
-    console.print(summary)
+    def operation():
+        cfg = load_agent_config(config)
+        with read_catalog(cfg) as conn:
+            if db.get_repo(conn, full_name) is None:
+                raise AgentError("not_found", f"Unknown repository: {full_name}")
+        cfg.ensure_directories()
+        cancel_event = Event()
+        try:
+            with _conn(cfg) as conn:
+                db.init_db(conn)
+                if force:
+                    status, summary = research_workflow.research_repository(
+                        cfg, conn, full_name, cancel_event=cancel_event, force=True
+                    )
+                else:
+                    status, summary = research_workflow.research_repository(
+                        cfg, conn, full_name, cancel_event=cancel_event
+                    )
+        except (KeyboardInterrupt, OperationCancelled) as exc:
+            cancel_event.set()
+            raise AgentError("cancelled", "Research interrupted.", 130) from exc
+        result = {"full_name": full_name, "status": status, "summary": summary[:20000],
+                  "summary_truncated": len(summary) > 20000}
+        if status not in {"success", "cached"}:
+            error = AgentError("cancelled" if status == "cancelled" else "research_failed",
+                               summary[:2000], 130 if status == "cancelled" else 1)
+            emit(result, json_output, error)
+            raise typer.Exit(error.exit_code)
+        if not json_output:
+            console.print(f"Research status: {status}")
+            console.print(summary)
+        return result
+    if json_output:
+        run_command(operation, True)
+    else:
+        try:
+            operation()
+        except (AgentError, OSError, ValueError, sqlite3.Error) as exc:
+            error = exc if isinstance(exc, AgentError) else AgentError("operation_failed", str(exc))
+            emit(None, False, error)
+            raise typer.Exit(error.exit_code) from exc
 
 
 @app.command("research-missing")
