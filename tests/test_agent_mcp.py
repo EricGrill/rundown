@@ -219,7 +219,9 @@ def test_invalid_json_constants_and_recursive_payload_do_not_stop_server(tmp_pat
         _frame(2, 'ping'),
     ])
     assert frames[0]['error']['code'] == -32700
-    assert frames[1]['error']['code'] == -32700
+    # Decoders differ in supported nesting depth. A decoder that accepts this
+    # valid JSON array rejects it as a JSON-RPC request; others fail parsing.
+    assert frames[1]['error']['code'] in {-32700, -32600}
     assert frames[-1] == {'jsonrpc': '2.0', 'id': 2, 'result': {}}
 
 
