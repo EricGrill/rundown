@@ -28,10 +28,14 @@ from .demo import demo_environment
 from .doctor import run_doctor
 from .config import AppConfig, load_config
 from .tui import RundownApp
+from . import search_cli
+from .agent_catalog import catalog_repositories
+from .agent_io import load_agent_config, read_catalog, run_command
 
 
 app = typer.Typer(help="Browse → Read → Prepare → Export. Run rd with no command to open Rundown.", invoke_without_command=True)
 console = Console()
+search_cli.register(app)
 
 
 class RepoDecision(str, Enum):
@@ -378,7 +382,15 @@ def list_repository_rows(
     config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
     project: Annotated[str | None, typer.Option("--project")] = None,
     include_archived: Annotated[bool, typer.Option("--include-archived")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Print a bounded machine-readable catalog.")] = False,
+    limit: Annotated[int, typer.Option("--limit", help="Maximum repositories in JSON output (1–100).")] = 100,
 ) -> None:
+    if json_output:
+        def operation():
+            with read_catalog(load_agent_config(config)) as conn:
+                return catalog_repositories(conn, project=project, include_archived=include_archived, limit=limit)
+        run_command(operation, True)
+        return
     cfg = _config(config)
     table = Table(title="Repositories")
     table.add_column("Name", no_wrap=True)
