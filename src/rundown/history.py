@@ -135,6 +135,7 @@ def format_research_history(rows: Sequence[Mapping[str, Any]]) -> str:
             blocks.append(f"Failed research: {row['timestamp'] or 'unknown time'}")
             blocks.extend(
                 f"  {item.get('harness', 'unknown')}: {item.get('reason', 'unknown')}"
+                + (f" ({item['detail']})" if item.get("detail") else "")
                 for item in attempts if isinstance(item, dict)
             )
         blocks.append(format_research_history([row for row in rows if dict(row).get("status") != "failed"]))
@@ -179,6 +180,7 @@ def format_research_history(rows: Sequence[Mapping[str, Any]]) -> str:
                 f"Actual model: {provenance.get('actual_model') or 'unknown'}",
                 "Attempts: " + (", ".join(
                     f"{item.get('harness', 'unknown')}: {item.get('reason', 'unknown')}"
+                    + (f" ({item['detail']})" if item.get("detail") else "")
                     for item in (provenance.get('attempts') or []) if isinstance(item, dict)
                 ) or "unknown"),
                 f"Generated: {provenance.get('generated_at') or latest['timestamp'] or 'unknown'}",

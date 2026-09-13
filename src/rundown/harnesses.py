@@ -19,6 +19,7 @@ class HarnessInvocation:
     argv: list[str]
     input: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    inherit_env: bool = True
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,10 @@ def decode_text(stdout: str) -> HarnessOutput:
 
 def decode_json(stdout: str) -> HarnessOutput:
     """Custom JSON envelope: {\"text\": report, \"model\": optional model id}."""
-    value = json.loads(stdout)
+    try:
+        value = json.loads(stdout)
+    except RecursionError as exc:
+        raise ValueError("JSON envelope exceeds supported nesting") from exc
     if not isinstance(value, dict) or not isinstance(value.get("text"), str):
         raise ValueError("Expected a JSON object with a text string")
     model = value.get("model")
@@ -49,6 +53,7 @@ class HarnessAdapter:
     build: Callable[[str, str | None, Path], HarnessInvocation]
     decode: Callable[[str], HarnessOutput] = decode_text
     supports_model: bool = True
+    preflight: Callable[[str | None], str | None] | None = None
 
 
 _REGISTRY: dict[str, HarnessAdapter] = {}
@@ -142,3 +147,12 @@ def selected_harnesses(settings: ResearchSettings) -> tuple[HarnessAdapter, ...]
     if settings.model is not None and any(not adapter.supports_model for adapter in selected):
         raise ValueError("Selected harness does not support model overrides")
     return selected
+
+
+def _register_additional_harnesses() -> None:
+    from .opencode_harness import opencode_adapter
+
+    register_harness(opencode_adapter())
+
+
+_register_additional_harnesses()

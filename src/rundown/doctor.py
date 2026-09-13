@@ -113,18 +113,25 @@ def _github_check() -> DoctorCheck:
 
 def _provider_check(config: AppConfig) -> DoctorCheck:
     selected = selected_harnesses(config.research)
+    blocked = {
+        adapter.identifier: detail
+        for adapter in selected
+        if adapter.preflight and (detail := adapter.preflight(config.research.model))
+    }
     available = tuple(adapter.identifier for adapter in selected if shutil.which(adapter.executable))
+    available = tuple(name for name in available if name not in blocked)
     order = ", ".join(adapter.identifier for adapter in selected)
+    details = " ".join(f"{name}: {detail}" for name, detail in blocked.items())
     if not available:
         return DoctorCheck(
             "Research provider", "warning" if config.research.provider == "auto" else "error",
-            f"No configured research harness is installed. Order: {order}.",
+            f"No configured research harness is ready. Order: {order}. {details}".strip(),
             "Install and authenticate a configured harness; saved research still works.",
         )
     return DoctorCheck(
         "Research provider", "ok",
         f"Configured order: {order}. Available: {', '.join(available)}. "
-        f"Requested model: {config.research.model or 'CLI default'}. Authentication was not probed.",
+        f"Requested model: {config.research.model or 'CLI default'}. Authentication was not probed. {details}".strip(),
         "Run the selected provider's own auth-status command if generation fails.",
     )
 

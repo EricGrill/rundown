@@ -11,7 +11,7 @@ Rundown syncs your starred repositories, organizes them into five categories, an
 
 - **Sync stars** from GitHub using the `gh` CLI
 - **Auto-categorize** into AI & Agents, Developer Tools, Infrastructure & Security, Knowledge & Learning, or Apps & Business
-- **AI research** via Claude Code, Gemini CLI, or Codex CLI—your choice
+- **AI research** via Claude Code, Gemini CLI, Codex CLI, isolated OpenCode, or a trusted custom command
 - **Browse → Read → Prepare → Export** in one keyboard-driven TUI
 - **Prepare show cards** with generated research and clearly separated human edits
 - **Export** the selected repository or repositories marked for presentation to Markdown
@@ -48,6 +48,7 @@ Prepare overrides beside the generated source, then export a selected card or ma
   - Claude Code: `claude auth login`
   - Gemini CLI: run `gemini` and complete its sign-in flow
   - Codex CLI: `codex login`
+  - OpenCode: explicit `provider/model` and its API key in the environment; personal OAuth/config files are not loaded. See [research harnesses](docs/research-harnesses.md).
 
 ## Install
 
@@ -207,7 +208,7 @@ provider = "auto"
 profile = "Describe the projects, languages, and constraints relevant to you."
 ```
 
-Valid providers are `auto`, `claude`, `gemini`, and `codex`. Rundown does not override a model, so each CLI uses its configured default.
+Harness selectors are `auto`, `claude`, `gemini`, `codex`, `opencode`, and explicitly configured custom names. The default automatic order remains Claude, Gemini, Codex. Use `research.fallback` to change it and optional `research.model` for supported model overrides. Existing harnesses retain their configured defaults when model is omitted; isolated OpenCode requires an explicit model. See [research harness configuration, safety, and provenance](docs/research-harnesses.md) and [compatibility testing](docs/harness-testing.md).
 
 ## Export for presentation
 
