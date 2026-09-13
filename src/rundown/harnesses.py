@@ -34,7 +34,10 @@ def decode_text(stdout: str) -> HarnessOutput:
 
 def decode_json(stdout: str) -> HarnessOutput:
     """Custom JSON envelope: {\"text\": report, \"model\": optional model id}."""
-    value = json.loads(stdout)
+    try:
+        value = json.loads(stdout)
+    except RecursionError as exc:
+        raise ValueError("JSON envelope exceeds supported nesting") from exc
     if not isinstance(value, dict) or not isinstance(value.get("text"), str):
         raise ValueError("Expected a JSON object with a text string")
     model = value.get("model")
