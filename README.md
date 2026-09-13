@@ -4,9 +4,23 @@
 [![GitHub Release](https://img.shields.io/github/v/release/EricGrill/rundown)](https://github.com/EricGrill/rundown/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Turn your GitHub stars into an organized, searchable catalog with AI-powered research.**
+**You've starred hundreds of GitHub repos—and forgotten why you saved most of them.**
 
-Rundown syncs your starred repositories, organizes them into five categories, and uses Claude, Gemini, or Codex CLIs to generate research summaries—all stored locally in SQLite and Markdown.
+Rundown turns that star graveyard into a research library. Sync your stars, auto-categorize them, and generate research summaries with Claude, Gemini, or Codex CLIs. Browse everything in a keyboard-driven TUI, mark repos for presentation, and export host briefs to Markdown.
+
+All local-first: SQLite storage, no API keys stored, no telemetry. Try it offline with `rd demo`.
+
+<!-- 
+🎬 HERO GIF PLACEHOLDER
+
+TODO: Add 20-30s animated demo here (see issue #31)
+Recording instructions: https://github.com/EricGrill/rundown/issues/31
+
+Suggested path: docs/images/tui-hero.gif
+Suggested flow: rd demo → filter → open host brief → switch views
+
+Until recorded, the static screenshots below demonstrate the TUI.
+-->
 
 ## Features
 
