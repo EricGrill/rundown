@@ -81,6 +81,82 @@ def test_fuzzy_excerpt_centers_actual_word_and_matching_work_is_bounded(tmp_path
     conn.close()
 
 
+def test_search_streams_auxiliary_reads_in_bounded_chunks(tmp_path, monkeypatch):
+    conn, _ = _catalog(tmp_path)
+    for index in range(8):
+        db.upsert_repo(
+            conn,
+            db.RepoInput(
+                f"acme/tool-{index}",
+                "acme",
+                f"tool-{index}",
+                f"https://github.com/acme/tool-{index}",
+                description="small terminal helper",
+            ),
+        )
+    conn.commit()
+    original = search_module._latest_research
+    batch_sizes = []
+
+    def tracked(conn, repo_ids=None, *, text_cap=None):
+        batch_sizes.append(len(repo_ids))
+        return original(conn, repo_ids, text_cap=text_cap)
+
+    monkeypatch.setattr(search_module, "_REPOSITORY_CHUNK_SIZE", 3)
+    monkeypatch.setattr(search_module, "_latest_research", tracked)
+
+    result = search_repositories(conn, "missing")
+
+    assert batch_sizes == [3, 3, 2]
+    assert result["corpus"]["repositories_scanned"] == 8
+    conn.close()
+
+
+def test_search_stops_at_global_text_and_token_work_budgets(tmp_path, monkeypatch):
+    conn, _ = _catalog(tmp_path)
+    for index in range(12):
+        db.upsert_repo(
+            conn,
+            db.RepoInput(
+                f"noise/repo-{index}",
+                "noise",
+                f"repo-{index}",
+                f"https://github.com/noise/repo-{index}",
+                description=" ".join(f"token-{item}" for item in range(80)),
+            ),
+        )
+    conn.commit()
+    original = search_module._tokens
+    token_reads = 0
+
+    def tracked(value, *, limit=2500):
+        nonlocal token_reads
+        tokens = original(value, limit=limit)
+        token_reads += len(tokens)
+        return tokens
+
+    monkeypatch.setattr(search_module, "_REPOSITORY_CHUNK_SIZE", 4)
+    monkeypatch.setattr(search_module, "_MAX_INDEXED_TOKEN_OCCURRENCES_PER_SEARCH", 17)
+    monkeypatch.setattr(search_module, "_MAX_INDEXED_TEXT_CHARS_PER_SEARCH", 1_000)
+    monkeypatch.setattr(search_module, "_tokens", tracked)
+
+    result = search_repositories(conn, "absent")
+    corpus = result["corpus"]
+
+    assert corpus["repositories_scanned"] < 12
+    assert corpus["indexed_token_occurrences"] <= 17
+    assert token_reads <= 18  # One query token plus the global corpus allowance.
+    assert corpus["token_budget_exhausted"] is True
+    assert corpus["indexed_text_chars"] <= 1_000
+
+    monkeypatch.setattr(search_module, "_MAX_INDEXED_TOKEN_OCCURRENCES_PER_SEARCH", 200_000)
+    monkeypatch.setattr(search_module, "_MAX_INDEXED_TEXT_CHARS_PER_SEARCH", 100)
+    text_limited = search_repositories(conn, "absent")["corpus"]
+    assert text_limited["text_budget_exhausted"] is True
+    assert text_limited["indexed_text_chars"] <= 100
+    conn.close()
+
+
 def test_search_filters_project_archived_and_has_deterministic_ties(tmp_path):
     conn, _ = _catalog(tmp_path)
     ids = []

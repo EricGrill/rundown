@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from difflib import SequenceMatcher
+from itertools import islice
 import re
 import sqlite3
-from typing import Any, Collection
+from typing import Any, Collection, Iterator
 
 from .agent_io import AgentError, validate_limit
 
@@ -19,6 +20,9 @@ _MAX_TOKENS_PER_REPOSITORY = 4_000
 _MAX_CANDIDATE_CHECKS_PER_TERM = 128
 _MAX_FUZZY_COMPARISONS_PER_REPOSITORY = 128
 _MAX_FUZZY_COMPARISONS_PER_SEARCH = 50_000
+_MAX_INDEXED_TEXT_CHARS_PER_SEARCH = 20_000_000
+_MAX_INDEXED_TOKEN_OCCURRENCES_PER_SEARCH = 200_000
+_REPOSITORY_CHUNK_SIZE = 100
 _EXCERPT_CHARS = 220
 
 _FIELD_WEIGHTS = {
@@ -55,8 +59,9 @@ def _value(row: Any, key: str, default: Any = None) -> Any:
 
 
 def _tokens(value: str, *, limit: int = 2500) -> list[str]:
-    return [match.group(0).casefold() for match in _TOKEN_RE.finditer(value[:_MAX_FIELD_CHARS])][
-        :limit
+    return [
+        match.group(0).casefold()
+        for match in islice(_TOKEN_RE.finditer(value[:_MAX_FIELD_CHARS]), limit)
     ]
 
 
@@ -85,13 +90,24 @@ def _token_similarity(
 
 def _token_index(
     fields: dict[str, str],
-) -> tuple[dict[str, str], dict[str, list[str]], bool]:
+    search_token_budget: list[int],
+) -> tuple[dict[str, str], dict[str, list[str]], bool, bool, int]:
     """Map each bounded token to its highest-weight source field."""
     index: dict[str, str] = {}
     buckets: dict[str, list[str]] = {}
     capped = False
+    budget_exhausted = False
+    indexed_occurrences = 0
     for field, text in fields.items():
-        tokens = _tokens(text, limit=_MAX_TOKENS_PER_FIELD + 1)
+        if search_token_budget[0] == 0:
+            budget_exhausted = True
+            break
+        token_limit = min(_MAX_TOKENS_PER_FIELD + 1, search_token_budget[0])
+        tokens = _tokens(text, limit=token_limit)
+        search_token_budget[0] -= len(tokens)
+        indexed_occurrences += len(tokens)
+        if search_token_budget[0] == 0:
+            budget_exhausted = True
         if len(tokens) > _MAX_TOKENS_PER_FIELD:
             capped = True
         for token in tokens[:_MAX_TOKENS_PER_FIELD]:
@@ -105,7 +121,7 @@ def _token_index(
                 continue
             index[token] = field
             buckets.setdefault(token[0], []).append(token)
-    return index, buckets, capped
+    return index, buckets, capped, budget_exhausted, indexed_occurrences
 
 
 def _excerpt(text: str, terms: list[str]) -> str:
@@ -193,23 +209,24 @@ def _repo_rows(
     *,
     project: str | None,
     include_archived: bool,
-) -> tuple[list[sqlite3.Row], bool]:
+) -> Iterator[sqlite3.Row]:
     text_fields = tuple(
         field for field in _FIELD_WEIGHTS if field not in {"host_notes", "research"}
     )
     scalar_fields = ("id", "stars", "archived", "status")
     selected: list[str] = []
-    params: list[Any] = []
+    text_params: list[Any] = []
     for field in text_fields:
         if field in columns:
             selected.append(f"substr({field}, 1, ?) AS {field}")
-            params.append(_MAX_FIELD_CHARS + 1)
+            text_params.append(_MAX_FIELD_CHARS + 1)
         else:
             selected.append(f"NULL AS {field}")
     for field in scalar_fields:
         selected.append(field if field in columns else f"NULL AS {field}")
 
     where: list[str] = []
+    filter_params: list[Any] = []
     if not include_archived:
         if "archived" in columns:
             where.append("COALESCE(archived, 0) = 0")
@@ -220,20 +237,31 @@ def _repo_rows(
             raise AgentError("invalid_input", "project must not be blank", 2)
         mapping_columns = _columns(conn, "project_mappings")
         if not {"repo_id", "project_name"}.issubset(mapping_columns):
-            return [], False
+            return iter(())
         where.append(
             "EXISTS (SELECT 1 FROM project_mappings mappings "
             "WHERE mappings.repo_id = repos.id AND mappings.project_name = ?)"
         )
-        params.append(project)
+        filter_params.append(project)
     clause = f"WHERE {' AND '.join(where)}" if where else ""
-    params.append(_MAX_REPOSITORIES + 1)
-    rows = conn.execute(
-        f"SELECT {', '.join(selected)} FROM repos {clause} "
+    candidate_cursor = conn.execute(
+        f"SELECT id, full_name FROM repos {clause} "
         "ORDER BY full_name COLLATE NOCASE, id LIMIT ?",
-        params,
-    ).fetchall()
-    return rows[:_MAX_REPOSITORIES], len(rows) > _MAX_REPOSITORIES
+        (*filter_params, _MAX_REPOSITORIES + 1),
+    )
+
+    def chunks() -> Iterator[sqlite3.Row]:
+        while candidates := candidate_cursor.fetchmany(_REPOSITORY_CHUNK_SIZE):
+            ids = [int(row["id"]) for row in candidates]
+            placeholders = ",".join("?" for _ in ids)
+            rows = conn.execute(
+                f"SELECT {', '.join(selected)} FROM repos WHERE id IN ({placeholders})",
+                (*text_params, *ids),
+            ).fetchall()
+            by_id = {int(row["id"]): row for row in rows}
+            yield from (by_id[repo_id] for repo_id in ids)
+
+    return chunks()
 
 
 def search_repositories(
@@ -265,118 +293,169 @@ def search_repositories(
     if not {"id", "full_name"}.issubset(repo_columns):
         return _response(query_text, project, include_archived, limit, [], scanned=0, capped=False)
 
-    rows, corpus_capped = _repo_rows(
+    rows = _repo_rows(
         conn, repo_columns, project=project, include_archived=include_archived
     )
-    candidate_ids = [int(row["id"]) for row in rows]
-    research = _latest_research(conn, candidate_ids, text_cap=_MAX_FIELD_CHARS)
-    notes = _host_notes(conn, candidate_ids)
     results: list[dict[str, Any]] = []
     search_fuzzy_budget = [_MAX_FUZZY_COMPARISONS_PER_SEARCH]
+    search_token_budget = [_MAX_INDEXED_TOKEN_OCCURRENCES_PER_SEARCH]
+    text_budget_remaining = _MAX_INDEXED_TEXT_CHARS_PER_SEARCH
     matching_budget_exhausted = False
+    text_budget_exhausted = False
+    token_budget_exhausted = False
     truncated_text_fields = 0
     truncated_token_indexes = 0
-    for row in rows:
-        data = dict(row)
-        repo_id = int(data["id"])
-        archived = bool(data.get("archived", 0)) or data.get("status") == "archived"
-        latest = research.get(repo_id)
-        raw_fields = {
-            "full_name": str(data.get("full_name") or ""),
-            "repo": str(data.get("repo") or ""),
-            "description": str(data.get("description") or ""),
-            "tags": str(data.get("tags") or ""),
-            "language": str(data.get("language") or ""),
-            "category": str(data.get("category") or ""),
-            "notes": str(data.get("notes") or ""),
-            "hook": str(data.get("hook") or ""),
-            "who_for": str(data.get("who_for") or ""),
-            "problem": str(data.get("problem") or ""),
-            "why_now": str(data.get("why_now") or ""),
-            "demo_path": str(data.get("demo_path") or ""),
-            "host_notes": notes.get(repo_id, ""),
-            "research": str(_value(latest, "summary", "")) if latest else "",
-        }
-        indexed_text_truncated = sorted(
-            name for name, text in raw_fields.items() if len(text) > _MAX_FIELD_CHARS
-        )
-        truncated_text_fields += len(indexed_text_truncated)
-        fields = {name: text[:_MAX_FIELD_CHARS] for name, text in raw_fields.items()}
-        token_index, token_buckets, token_cap_reached = _token_index(fields)
-        truncated_token_indexes += int(token_cap_reached)
-        matched_fields: set[str] = set()
-        matched_terms: dict[str, list[str]] = {}
-        score = 0.0
-        repo_fuzzy_budget = [_MAX_FUZZY_COMPARISONS_PER_REPOSITORY]
-        for term in query_tokens:
-            best = (0.0, "", "")
-            exact_field = token_index.get(term)
-            if exact_field is not None:
-                best = (_FIELD_WEIGHTS[exact_field], exact_field, term)
-            else:
-                bucket = token_buckets.get(term[0], [])
-                candidates = bucket[:_MAX_CANDIDATE_CHECKS_PER_TERM]
-                if len(bucket) > _MAX_CANDIDATE_CHECKS_PER_TERM:
-                    matching_budget_exhausted = True
-                for actual in candidates:
-                    name = token_index[actual]
-                    similarity, exhausted = _token_similarity(
-                        term, actual, repo_fuzzy_budget, search_fuzzy_budget
-                    )
-                    matching_budget_exhausted = matching_budget_exhausted or exhausted
-                    weighted = similarity * _FIELD_WEIGHTS[name]
-                    if weighted > best[0]:
-                        best = (weighted, name, actual)
-            if best[0] == 0:
+    indexed_text_chars = 0
+    indexed_token_occurrences = 0
+    scanned = 0
+    corpus_capped = False
+    stop = False
+    while not stop:
+        chunk = list(islice(rows, _REPOSITORY_CHUNK_SIZE))
+        if not chunk:
+            break
+        if scanned + len(chunk) > _MAX_REPOSITORIES:
+            chunk = chunk[: _MAX_REPOSITORIES - scanned]
+            corpus_capped = True
+        candidate_ids = [int(row["id"]) for row in chunk]
+        research = _latest_research(conn, candidate_ids, text_cap=_MAX_FIELD_CHARS)
+        notes = _host_notes(conn, candidate_ids)
+        for row in chunk:
+            data = dict(row)
+            repo_id = int(data["id"])
+            archived = bool(data.get("archived", 0)) or data.get("status") == "archived"
+            latest = research.get(repo_id)
+            raw_fields = {
+                "full_name": str(data.get("full_name") or ""),
+                "repo": str(data.get("repo") or ""),
+                "description": str(data.get("description") or ""),
+                "tags": str(data.get("tags") or ""),
+                "language": str(data.get("language") or ""),
+                "category": str(data.get("category") or ""),
+                "notes": str(data.get("notes") or ""),
+                "hook": str(data.get("hook") or ""),
+                "who_for": str(data.get("who_for") or ""),
+                "problem": str(data.get("problem") or ""),
+                "why_now": str(data.get("why_now") or ""),
+                "demo_path": str(data.get("demo_path") or ""),
+                "host_notes": notes.get(repo_id, ""),
+                "research": str(_value(latest, "summary", "")) if latest else "",
+            }
+            fields = {name: text[:_MAX_FIELD_CHARS] for name, text in raw_fields.items()}
+            repo_text_chars = sum(len(text) for text in fields.values())
+            if repo_text_chars > text_budget_remaining:
+                text_budget_exhausted = True
+                stop = True
                 break
-            score += best[0]
-            matched_fields.add(best[1])
-            matched_terms.setdefault(best[1], []).append(best[2])
-        else:
-            folded_query = query_text.casefold()
-            for name in tuple(matched_fields):
-                text = fields[name]
-                if folded_query in text.casefold():
-                    score += _FIELD_WEIGHTS[name] * 0.5
-                    matched_fields.add(name)
-                    matched_terms.setdefault(name, []).extend(query_tokens)
-            if query_text.casefold() == fields["full_name"].casefold():
-                score += 100.0
-            kinds = {
-                name: ("generated" if name == "research" else "human" if name in {"notes", "host_notes", "hook", "who_for", "problem", "why_now", "demo_path"} else "metadata")
-                for name in sorted(matched_fields)
-            }
-            excerpts = {
-                name: _excerpt(fields[name], matched_terms.get(name, query_tokens))
-                for name in sorted(matched_fields)
-                if fields[name]
-            }
-            results.append(
-                {
-                    "full_name": data["full_name"],
-                    "description": data.get("description"),
-                    "language": data.get("language"),
-                    "stars": data.get("stars"),
-                    "archived": archived,
-                    "score": round(score, 3),
-                    "matched_fields": sorted(matched_fields),
-                    "match_sources": [
-                        {"field": name, "source_kind": kinds[name]}
-                        for name in sorted(matched_fields)
-                    ],
-                    "excerpts": excerpts,
-                    "indexed_text_truncated": indexed_text_truncated,
-                    "indexed_token_cap_reached": token_cap_reached,
-                    "research_timestamp": _value(latest, "timestamp") if latest else None,
-                    "generated_matches_unverified": "research" in matched_fields,
-                }
+            text_budget_remaining -= repo_text_chars
+            indexed_text_chars += repo_text_chars
+            indexed_text_truncated = sorted(
+                name for name, text in raw_fields.items() if len(text) > _MAX_FIELD_CHARS
             )
+            truncated_text_fields += len(indexed_text_truncated)
+            (
+                token_index,
+                token_buckets,
+                token_cap_reached,
+                repo_token_budget_exhausted,
+                repo_token_occurrences,
+            ) = _token_index(fields, search_token_budget)
+            indexed_token_occurrences += repo_token_occurrences
+            token_budget_exhausted = token_budget_exhausted or repo_token_budget_exhausted
+            truncated_token_indexes += int(token_cap_reached)
+            scanned += 1
+            matched_fields: set[str] = set()
+            matched_terms: dict[str, list[str]] = {}
+            score = 0.0
+            repo_fuzzy_budget = [_MAX_FUZZY_COMPARISONS_PER_REPOSITORY]
+            for term in query_tokens:
+                best = (0.0, "", "")
+                exact_field = token_index.get(term)
+                if exact_field is not None:
+                    best = (_FIELD_WEIGHTS[exact_field], exact_field, term)
+                else:
+                    bucket = token_buckets.get(term[0], [])
+                    candidates = bucket[:_MAX_CANDIDATE_CHECKS_PER_TERM]
+                    if len(bucket) > _MAX_CANDIDATE_CHECKS_PER_TERM:
+                        matching_budget_exhausted = True
+                    for actual in candidates:
+                        name = token_index[actual]
+                        similarity, exhausted = _token_similarity(
+                            term, actual, repo_fuzzy_budget, search_fuzzy_budget
+                        )
+                        matching_budget_exhausted = matching_budget_exhausted or exhausted
+                        weighted = similarity * _FIELD_WEIGHTS[name]
+                        if weighted > best[0]:
+                            best = (weighted, name, actual)
+                if best[0] == 0:
+                    break
+                score += best[0]
+                matched_fields.add(best[1])
+                matched_terms.setdefault(best[1], []).append(best[2])
+            else:
+                folded_query = query_text.casefold()
+                for name in tuple(matched_fields):
+                    text = fields[name]
+                    if folded_query in text.casefold():
+                        score += _FIELD_WEIGHTS[name] * 0.5
+                        matched_fields.add(name)
+                        matched_terms.setdefault(name, []).extend(query_tokens)
+                if query_text.casefold() == fields["full_name"].casefold():
+                    score += 100.0
+                kinds = {
+                    name: (
+                        "generated"
+                        if name == "research"
+                        else "human"
+                        if name in {
+                            "notes", "host_notes", "hook", "who_for", "problem",
+                            "why_now", "demo_path",
+                        }
+                        else "metadata"
+                    )
+                    for name in sorted(matched_fields)
+                }
+                excerpts = {
+                    name: _excerpt(fields[name], matched_terms.get(name, query_tokens))
+                    for name in sorted(matched_fields)
+                    if fields[name]
+                }
+                results.append(
+                    {
+                        "full_name": data["full_name"],
+                        "description": data.get("description"),
+                        "language": data.get("language"),
+                        "stars": data.get("stars"),
+                        "archived": archived,
+                        "score": round(score, 3),
+                        "matched_fields": sorted(matched_fields),
+                        "match_sources": [
+                            {"field": name, "source_kind": kinds[name]}
+                            for name in sorted(matched_fields)
+                        ],
+                        "excerpts": excerpts,
+                        "indexed_text_truncated": indexed_text_truncated,
+                        "indexed_token_cap_reached": token_cap_reached,
+                        "research_timestamp": _value(latest, "timestamp") if latest else None,
+                        "generated_matches_unverified": "research" in matched_fields,
+                    }
+                )
+            if token_budget_exhausted:
+                stop = True
+                break
+        if scanned >= _MAX_REPOSITORIES:
+            corpus_capped = corpus_capped or next(rows, None) is not None
+            break
 
     results.sort(key=lambda item: (-item["score"], str(item["full_name"]).casefold()))
     return _response(
         query_text, project, include_archived, limit, results[:limit],
-        scanned=len(rows), capped=corpus_capped,
+        scanned=scanned, capped=corpus_capped,
         matching_budget_exhausted=matching_budget_exhausted,
+        text_budget_exhausted=text_budget_exhausted,
+        token_budget_exhausted=token_budget_exhausted,
+        indexed_text_chars=indexed_text_chars,
+        indexed_token_occurrences=indexed_token_occurrences,
         truncated_text_fields=truncated_text_fields,
         truncated_token_indexes=truncated_token_indexes,
     )
@@ -392,6 +471,10 @@ def _response(
     scanned: int,
     capped: bool,
     matching_budget_exhausted: bool = False,
+    text_budget_exhausted: bool = False,
+    token_budget_exhausted: bool = False,
+    indexed_text_chars: int = 0,
+    indexed_token_occurrences: int = 0,
     truncated_text_fields: int = 0,
     truncated_token_indexes: int = 0,
 ) -> dict[str, Any]:
@@ -412,12 +495,19 @@ def _response(
                 "max_candidate_checks_per_term": _MAX_CANDIDATE_CHECKS_PER_TERM,
                 "max_fuzzy_comparisons_per_repository": _MAX_FUZZY_COMPARISONS_PER_REPOSITORY,
                 "max_fuzzy_comparisons_per_search": _MAX_FUZZY_COMPARISONS_PER_SEARCH,
+                "max_indexed_text_chars_per_search": _MAX_INDEXED_TEXT_CHARS_PER_SEARCH,
+                "max_indexed_token_occurrences_per_search": _MAX_INDEXED_TOKEN_OCCURRENCES_PER_SEARCH,
+                "repository_chunk_size": _REPOSITORY_CHUNK_SIZE,
             },
         },
         "corpus": {
             "repositories_scanned": scanned,
             "candidate_cap_reached": capped,
             "matching_budget_exhausted": matching_budget_exhausted,
+            "text_budget_exhausted": text_budget_exhausted,
+            "token_budget_exhausted": token_budget_exhausted,
+            "indexed_text_chars": indexed_text_chars,
+            "indexed_token_occurrences": indexed_token_occurrences,
             "text_fields_truncated": truncated_text_fields,
             "token_indexes_truncated": truncated_token_indexes,
         },
