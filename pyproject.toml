@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "rundown"
 version = "0.2.0"
-description = "Turn GitHub stars into research cards and host briefs in the terminal. Local-first TUI powered by Claude, Gemini, or Codex CLIs."
+description = "Turn GitHub stars into research cards and host briefs with a local-first TUI and configurable AI harnesses."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -40,7 +40,6 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
   "Topic :: Terminals",
   "Topic :: Utilities",
-  "Typing :: Typed",
 ]
 dependencies = [
   "rich>=13.7",
@@ -86,6 +85,7 @@ include = [
   "scripts/",
   "config/rundown.toml",
   "docs/",
+  "examples/",
   "LICENSE",
   "README.md",
   "pyproject.toml",
