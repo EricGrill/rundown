@@ -1,7 +1,7 @@
 import asyncio
 
 from textual.app import App
-from textual.widgets import Input, Markdown, Select, Static
+from textual.widgets import Collapsible, Input, Markdown, Select, Static
 
 from rundown.cards import CardRecord
 from rundown.catalog import CatalogView
@@ -30,6 +30,10 @@ def test_template_preset_live_preview_and_keyboard_save():
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             assert app.screen.has_class("compact")
+            assert app.screen.query_one("#template-customize", Collapsible).collapsed
+            assert "only owner/project" in str(
+                app.screen.query_one("#template-scope-summary", Static).render()
+            )
             app.screen.query_one("#template-preset", Select).value = "discovery"
             await pilot.pause()
             assert app.screen.query_one("#template-duration", Input).value == "60"
@@ -39,6 +43,51 @@ def test_template_preset_live_preview_and_keyboard_save():
             assert isinstance(app.result, TemplateResult)
             assert app.result.scope == "repo"
             assert app.result.settings == PRESETS["discovery"]
+
+    asyncio.run(run())
+
+
+def test_template_basic_save_preserves_hidden_settings():
+    async def run():
+        settings = PRESETS["deep_dive"]
+        app = ModalApp(TemplateScreen(settings, repo_name="owner/project"))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            assert app.screen.query_one("#template-customize", Collapsible).collapsed
+            app.screen.query_one("#template-duration", Input).value = "240"
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert isinstance(app.result, TemplateResult)
+            assert app.result.scope == "repo"
+            assert app.result.settings.duration_seconds == 240
+            assert app.result.settings.default_view == settings.default_view
+            assert app.result.settings.audience == settings.audience
+            assert app.result.settings.tone == settings.tone
+            assert app.result.settings.host == settings.host
+            assert app.result.settings.research == settings.research
+
+    asyncio.run(run())
+
+
+def test_template_customize_is_keyboard_accessible_and_updates_scope():
+    async def run():
+        app = ModalApp(TemplateScreen(CardSettings(), repo_name="owner/project"))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            disclosure = app.screen.query_one("#template-customize", Collapsible)
+            disclosure.query_one("CollapsibleTitle").focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not disclosure.collapsed
+            app.screen.query_one("#template-scope", Select).value = "global"
+            await pilot.pause()
+            assert "global default" in str(
+                app.screen.query_one("#template-scope-summary", Static).render()
+            )
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert isinstance(app.result, TemplateResult)
+            assert app.result.scope == "global"
 
     asyncio.run(run())
 

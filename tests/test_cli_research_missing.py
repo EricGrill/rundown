@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from rich.console import Console
 from rich.live import Live as RichLive
+from threading import Event
 from typer.testing import CliRunner
 
 from rundown import db
@@ -66,6 +67,62 @@ def render_live(live):
     return output.getvalue()
 
 
+def test_single_research_uses_cancellable_workflow_and_reports_auto_clone(tmp_path):
+    config_file, _ = configured_repos(
+        tmp_path, [("owner/project", "2026-03-01")]
+    )
+    observed = {}
+
+    def fake_clone(_config, _conn, _full_name, *, cancel_event):
+        observed["clone_event"] = cancel_event
+        return "cloned", "ready"
+
+    def fake_research(_config, _conn, _full_name, *, cancel_event):
+        observed["research_event"] = cancel_event
+        return "success", "Fresh research"
+
+    with (
+        patch("rundown.cli.repo_ops.clone_repo", fake_clone),
+        patch(
+            "rundown.research_workflow.research.run_repository_research",
+            fake_research,
+        ),
+    ):
+        result = runner.invoke(
+            app,
+            ["research", "owner/project", "--config", str(config_file)],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert isinstance(observed["clone_event"], Event)
+    assert observed["clone_event"] is observed["research_event"]
+    assert "Research status: success" in result.output
+    assert "Automatically cloned owner/project before research." in result.output
+
+
+def test_single_research_sets_cancellation_event_on_keyboard_interrupt(tmp_path):
+    config_file, _ = configured_repos(
+        tmp_path, [("owner/project", "2026-03-01")]
+    )
+    observed = {}
+
+    def interrupt(_config, _conn, _full_name, *, cancel_event):
+        observed["event"] = cancel_event
+        raise KeyboardInterrupt
+
+    with patch(
+        "rundown.cli.research_workflow.research_repository", interrupt
+    ):
+        result = runner.invoke(
+            app,
+            ["research", "owner/project", "--config", str(config_file)],
+        )
+
+    assert result.exit_code == 130
+    assert observed["event"].is_set()
+    assert "Research interrupted." in result.output
+
+
 def test_skips_only_successful_repository_understanding_research(tmp_path):
     config_file, database = configured_repos(
         tmp_path,
@@ -82,17 +139,17 @@ def test_skips_only_successful_repository_understanding_research(tmp_path):
     cloned = []
     researched = []
 
-    def fake_clone(_config, _conn, full_name):
+    def fake_clone(_config, _conn, full_name, **_options):
         cloned.append(full_name)
         return "already_cloned", "ready"
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         researched.append(full_name)
         return "success", "done"
 
     with (
         patch("rundown.cli.repo_ops.clone_repo", fake_clone),
-        patch("rundown.cli.research.run_repository_research", fake_research),
+        patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
 
@@ -114,7 +171,7 @@ def test_cached_status_counts_as_success(tmp_path):
             return_value=("already_cloned", "ready"),
         ),
         patch(
-            "rundown.cli.research.run_repository_research",
+            "rundown.research_workflow.research.run_repository_research",
             return_value=("cached", "saved result"),
         ),
     ):
@@ -142,8 +199,9 @@ def test_limit_uses_newest_starred_order_with_name_tiebreaker(tmp_path):
             return_value=("already_cloned", "ready"),
         ),
         patch(
-            "rundown.cli.research.run_repository_research",
-            side_effect=lambda _config, _conn, name: researched.append(name) or ("success", "done"),
+            "rundown.research_workflow.research.run_repository_research",
+            side_effect=lambda _config, _conn, name, **_options: researched.append(name)
+            or ("success", "done"),
         ),
     ):
         result = invoke(config_file, "--limit", "2")
@@ -161,7 +219,7 @@ def test_dry_run_lists_selection_without_clone_or_research(tmp_path):
     with (
         patch("rundown.cli.Live") as live,
         patch("rundown.cli.repo_ops.clone_repo") as clone_repo,
-        patch("rundown.cli.research.run_repository_research") as run_research,
+        patch("rundown.research_workflow.research.run_repository_research") as run_research,
     ):
         result = invoke(config_file, "--dry-run", "--limit", "1")
 
@@ -184,7 +242,7 @@ def test_zero_missing_reports_no_work(tmp_path):
     with (
         patch("rundown.cli.Live") as live,
         patch("rundown.cli.repo_ops.clone_repo") as clone_repo,
-        patch("rundown.cli.research.run_repository_research") as run_research,
+        patch("rundown.research_workflow.research.run_repository_research") as run_research,
     ):
         result = invoke(config_file)
 
@@ -202,7 +260,7 @@ def test_failure_continues_to_next_repository_and_exits_nonzero(tmp_path):
     )
     researched = []
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         researched.append(full_name)
         if full_name == "first/project":
             return "failed", "agent failed"
@@ -213,7 +271,7 @@ def test_failure_continues_to_next_repository_and_exits_nonzero(tmp_path):
             "rundown.cli.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
-        patch("rundown.cli.research.run_repository_research", fake_research),
+        patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
 
@@ -235,7 +293,7 @@ def test_later_exception_preserves_earlier_success_and_continues(tmp_path):
     )
     researched = []
 
-    def fake_research(_config, conn, full_name):
+    def fake_research(_config, conn, full_name, **_options):
         researched.append(full_name)
         row = db.get_repo(conn, full_name)
         if full_name == "second/project":
@@ -254,7 +312,7 @@ def test_later_exception_preserves_earlier_success_and_continues(tmp_path):
             "rundown.cli.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
-        patch("rundown.cli.research.run_repository_research", fake_research),
+        patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
 
@@ -285,7 +343,7 @@ def test_clone_failure_skips_research_and_continues(tmp_path):
     )
     researched = []
 
-    def fake_clone(_config, _conn, full_name):
+    def fake_clone(_config, _conn, full_name, **_options):
         if full_name == "clone/fails":
             return "failed", "authentication required"
         return "cloned", "done"
@@ -293,15 +351,19 @@ def test_clone_failure_skips_research_and_continues(tmp_path):
     with (
         patch("rundown.cli.repo_ops.clone_repo", fake_clone),
         patch(
-            "rundown.cli.research.run_repository_research",
-            side_effect=lambda _config, _conn, name: researched.append(name) or ("success", "done"),
+            "rundown.research_workflow.research.run_repository_research",
+            side_effect=lambda _config, _conn, name, **_options: researched.append(name)
+            or ("success", "done"),
         ),
     ):
         result = invoke(config_file)
 
     assert result.exit_code == 1
     assert researched == ["clone/works"]
-    assert "Research failed for clone/fails: authentication required" in result.output
+    normalized_output = " ".join(result.output.split())
+    assert "Research failed for clone/fails: Research stopped" in normalized_output
+    assert "could not be cloned." in normalized_output
+    assert "authentication required" in result.output
     assert "Succeeded: 1. Failed: 1." in result.output
 
 
@@ -327,11 +389,11 @@ def test_terminal_progress_shows_stages_counts_and_results_then_cleans_up(tmp_pa
         displays.append(live)
         return live
 
-    def fake_clone(_config, _conn, _full_name):
+    def fake_clone(_config, _conn, _full_name, **_options):
         clone_snapshots.append(render_live(displays[0]))
         return "already_cloned", "ready"
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         research_snapshots.append(render_live(displays[0]))
         if full_name == "first/project":
             return "failed", "provider unavailable"
@@ -341,7 +403,7 @@ def test_terminal_progress_shows_stages_counts_and_results_then_cleans_up(tmp_pa
         patch.object(cli, "console", terminal_console),
         patch.object(cli, "Live", side_effect=live_factory),
         patch("rundown.cli.repo_ops.clone_repo", fake_clone),
-        patch("rundown.cli.research.run_repository_research", fake_research),
+        patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
 
@@ -370,6 +432,7 @@ def test_keyboard_interrupt_reports_partial_progress_and_commits_completed_work(
     terminal_output = StringIO()
     terminal_console = Console(file=terminal_output, force_terminal=True, width=80)
     displays = []
+    cancel_events = []
 
     def live_factory(renderable, **kwargs):
         kwargs.pop("refresh_per_second", None)
@@ -377,7 +440,8 @@ def test_keyboard_interrupt_reports_partial_progress_and_commits_completed_work(
         displays.append(live)
         return live
 
-    def fake_research(_config, conn, full_name):
+    def fake_research(_config, conn, full_name, **options):
+        cancel_events.append(options["cancel_event"])
         if full_name == "second/project":
             raise KeyboardInterrupt
         row = db.get_repo(conn, full_name)
@@ -397,11 +461,14 @@ def test_keyboard_interrupt_reports_partial_progress_and_commits_completed_work(
             "rundown.cli.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
-        patch("rundown.cli.research.run_repository_research", fake_research),
+        patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
 
     assert result.exit_code == 130
+    assert len(cancel_events) == 2
+    assert cancel_events[0] is cancel_events[1]
+    assert cancel_events[1].is_set()
     assert displays[0].is_started is False
     plain_output = terminal_output.getvalue()
     assert "Research interrupted" in plain_output
@@ -421,7 +488,7 @@ def test_non_terminal_output_is_plain_and_preserves_markup_like_errors(tmp_path)
     output = StringIO()
     plain_console = Console(file=output, force_terminal=False, width=80)
 
-    def fake_research(_config, _conn, full_name):
+    def fake_research(_config, _conn, full_name, **_options):
         if full_name == "failed/project":
             return "failed", "provider returned [red]bad[/red] [bold]response[/bold]"
         return "cached", "saved result"
@@ -433,7 +500,7 @@ def test_non_terminal_output_is_plain_and_preserves_markup_like_errors(tmp_path)
             "rundown.cli.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
-        patch("rundown.cli.research.run_repository_research", fake_research),
+        patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
 

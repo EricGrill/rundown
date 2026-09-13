@@ -460,7 +460,7 @@ def test_generate_repository_research_uses_available_agent_without_tools(tmp_pat
 
     with (
         patch("rundown.research.shutil.which", return_value="/usr/local/bin/claude"),
-        patch("rundown.research.subprocess.run", return_value=completed) as run,
+        patch("rundown.research.run_command", return_value=completed) as run,
     ):
         output = research.generate_repository_research(config, "research prompt", tmp_path)
 

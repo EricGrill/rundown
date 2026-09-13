@@ -172,15 +172,15 @@ def test_search_filters_name_and_description_then_researches_visible_repo(tmp_pa
         app = RundownApp(config, fetch_starred=lambda: [])
         with (
             patch(
-                "rundown.tui.research.load_cached_repository_research",
+                "rundown.research_workflow.research.load_cached_repository_research",
                 return_value=None,
             ),
             patch(
-                "rundown.tui.repo_ops.clone_repo",
+                "rundown.research_workflow.repo_ops.clone_repo",
                 return_value=("already_cloned", "Already cloned."),
             ),
             patch(
-                "rundown.tui.research.run_repository_research",
+                "rundown.research_workflow.research.run_repository_research",
                 fake_research,
             ),
         ):
@@ -328,8 +328,8 @@ def test_removed_action_letters_do_not_trigger_repo_operations(tmp_path):
     async def run_test():
         app = RundownApp(config, fetch_starred=lambda: [])
         with (
-            patch("rundown.tui.repo_ops.clone_repo") as clone_repo,
-            patch("rundown.tui.research.run_repository_research") as run_research,
+            patch("rundown.research_workflow.repo_ops.clone_repo") as clone_repo,
+            patch("rundown.research_workflow.research.run_repository_research") as run_research,
             patch("rundown.tui.subprocess.run") as run_external,
         ):
             async with app.run_test(size=(120, 30)) as pilot:
@@ -395,6 +395,8 @@ def test_command_palette_is_curated_filterable_and_invokes_find(tmp_path):
                 "Refresh selected research",
                 "Switch research card view",
                 "Edit host notes",
+                "Prepare card",
+                "Export card",
                 "Sync GitHub stars",
                 "Research jobs",
                 "Edit card template",
@@ -518,7 +520,7 @@ def test_research_key_preserves_selected_repo_after_sorted_reload(tmp_path):
 
     async def run_test():
         app = RundownApp(config, fetch_starred=lambda: [])
-        with patch("rundown.tui.research.run_repository_research", fake_research):
+        with patch("rundown.research_workflow.research.run_repository_research", fake_research):
             async with app.run_test(size=(140, 30)) as pilot:
                 table = app.query_one("#repos", DataTable)
                 table.move_cursor(row=0)
@@ -585,15 +587,15 @@ def test_two_research_jobs_run_in_queue_order_and_preserve_selection(tmp_path):
         app = RundownApp(config, fetch_starred=lambda: [])
         with (
             patch(
-                "rundown.tui.research.load_cached_repository_research",
+                "rundown.research_workflow.research.load_cached_repository_research",
                 return_value=None,
             ),
             patch(
-                "rundown.tui.repo_ops.clone_repo",
+                "rundown.research_workflow.repo_ops.clone_repo",
                 return_value=("already_cloned", "Already cloned."),
             ),
             patch(
-                "rundown.tui.research.run_repository_research",
+                "rundown.research_workflow.research.run_repository_research",
                 fake_research,
             ),
         ):
@@ -754,9 +756,9 @@ def test_cached_research_skips_clone_and_research_agent(tmp_path):
     async def run_test():
         app = RundownApp(config, fetch_starred=lambda: [])
         with (
-            patch("rundown.tui.repo_ops.clone_repo") as clone_repo,
+            patch("rundown.research_workflow.repo_ops.clone_repo") as clone_repo,
             patch(
-                "rundown.tui.research.run_repository_research"
+                "rundown.research_workflow.research.run_repository_research"
             ) as run_research,
         ):
             async with app.run_test(size=(140, 30)) as pilot:
@@ -810,8 +812,8 @@ def test_research_auto_clones_before_readme_analysis(tmp_path):
     async def run_test():
         app = RundownApp(config, fetch_starred=lambda: [])
         with (
-            patch("rundown.tui.repo_ops.clone_repo", fake_clone),
-            patch("rundown.tui.research.run_repository_research", fake_research),
+            patch("rundown.research_workflow.repo_ops.clone_repo", fake_clone),
+            patch("rundown.research_workflow.research.run_repository_research", fake_research),
         ):
             async with app.run_test(size=(140, 30)) as pilot:
                 await pilot.press("r")

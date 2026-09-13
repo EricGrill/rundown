@@ -26,9 +26,10 @@ Until recorded, the static screenshots below demonstrate the TUI.
 
 - **Sync stars** from GitHub using the `gh` CLI
 - **Auto-categorize** into AI & Agents, Developer Tools, Infrastructure & Security, Knowledge & Learning, or Apps & Business
-- **AI research** via Claude Code, Gemini CLI, or Codex CLI—your choice
-- **Browse and filter** in a keyboard-driven TUI
-- **Export** repositories marked for presentation to Markdown
+- **AI research** via Claude Code, Gemini CLI, Codex CLI, isolated OpenCode, or a trusted custom command
+- **Browse → Read → Prepare → Export** in one keyboard-driven TUI
+- **Prepare show cards** with generated research and clearly separated human edits
+- **Export** the selected repository or repositories marked for presentation to Markdown
 - **Local-first**: all data stays on your machine
 
 ## TUI preview
@@ -47,6 +48,12 @@ Press `Ctrl+P` to open the searchable action menu:
 
 ![Rundown command menu with actions for research, reading, filtering, classification, and syncing](docs/images/tui-menu.png)
 
+Prepare overrides beside the generated source, then export a selected card or marked repositories:
+
+![Rundown unified card editor showing an editable hook beside read-only generated research](docs/images/tui-prepare.png)
+
+![Rundown export dialog with scope, file path, and explicit overwrite choice](docs/images/tui-export.png)
+
 ## Requirements
 
 - Python 3.11 or newer
@@ -56,6 +63,7 @@ Press `Ctrl+P` to open the searchable action menu:
   - Claude Code: `claude auth login`
   - Gemini CLI: run `gemini` and complete its sign-in flow
   - Codex CLI: `codex login`
+  - OpenCode: explicit `provider/model` and its API key in the environment; personal OAuth/config files are not loaded. See [research harnesses](docs/research-harnesses.md).
 
 ## Install
 
@@ -71,7 +79,7 @@ Or with pipx:
 pipx install git+https://github.com/EricGrill/rundown.git
 ```
 
-The CLI is available as `rundown` and its short alias `rd`. Check your setup and explore the bundled demo:
+The CLI is available as `rundown` and its short alias `rd`. Run either command with no arguments in an interactive terminal to open the app. Check your setup and explore the bundled demo:
 
 ```bash
 rd doctor
@@ -87,11 +95,11 @@ See the [install and upgrade guide](docs/install.md) for upgrades, version relea
 ## Quick start
 
 ```bash
-# Sync your GitHub stars
-rd sync-stars
+# Open Rundown
+rd
 
-# Browse in the TUI
-rd tui
+# Or open the offline sample catalog
+rd demo
 
 # Research a specific repository (optional)
 rd research OWNER/REPO
@@ -104,6 +112,12 @@ rd mark pydantic/pydantic shortlist
 rd export
 ```
 
+On an empty first run, choose **Try demo** for the isolated sample catalog or **Connect GitHub** to use your stars. Rundown uses an existing authenticated `gh` session when available and otherwise shows the exact setup command. Existing catalogs open directly. Scripts and automation can keep using explicit commands such as `rd sync-stars`, `rd research`, and `rd export`; a no-argument noninteractive invocation prints guidance instead of opening a TUI.
+
+![Rundown first-run screen offering an offline demo or GitHub connection](docs/images/tui-welcome.png)
+
+The main screen follows four steps: **Browse** a repository, **Read** its saved research, **Prepare** the human parts of its card, then **Export** it. The contextual action row shows those steps for the selected repository. Maintenance and less common actions remain in `Ctrl+P`.
+
 ## TUI keys
 
 | Key | Action |
@@ -114,7 +128,9 @@ rd export
 | `Shift+R` | Refresh research, bypassing the saved result |
 | `v` | Switch between Host brief and Research card |
 | `p` | Toggle whether this repository is marked for presentation |
-| `n` | Edit host notes; `Ctrl+S` saves and `Esc` cancels |
+| `e` | Prepare the card: edit presentation fields and notes together |
+| `x` | Export the selected repository or all marked repositories |
+| `n` | Open the same card editor directly at Host notes |
 | `t` | Edit card templates and preview saved research |
 | `g` | Research filters, sorting, and named catalog views |
 | `j` | Research jobs, cancellation, and retry |
@@ -139,9 +155,11 @@ The screenshots below show the running TUI with illustrative research from the o
 
 ![Rundown Research card with structured findings and expandable detail](docs/images/tui-research-card.png)
 
-**Host notes are yours.** Press `n` to edit them, `Ctrl+S` to save, or `Esc` to cancel. Notes are stored separately from generated research and survive syncs, view changes, and research refreshes. Demo ideas are labeled **not rehearsed**; generated source references are not independent verification.
+Press `e` to prepare the selected card in one place. Choose **Hook**, **Who it is for**, **Problem**, **Why now**, **Demo path**, **Host notes**, or **Repository notes**. The editor places your writable value beside its read-only generated source. **Reset to generated** clears only the selected override; it never changes research or unrelated notes. `Ctrl+S` saves every human field together, while `Esc` discards the draft. Press `n` to open this same editor directly at **Host notes**. Human edits survive syncs, view changes, and research refreshes.
 
-Press `t` to choose **60-second discovery**, **Technical deep dive**, or **Live demo**. Edit audience, tone, target duration, section visibility/order, and preview length while previewing saved research. `Ctrl+S` saves; `Esc` cancels. Save globally or for the selected repository. Repository templates override saved global settings, which override TOML defaults. **Use global card template** in the action menu removes a repository override.
+Press `t` to choose **Quick overview**, **Deep research**, or **Show segment**, then set the target duration. Open **Customize** for audience, tone, default card, section visibility/order, preview length, and global or repository scope. The live preview always uses saved research and never calls a provider. `Ctrl+S` saves; `Esc` cancels. Repository templates override saved global settings, which override TOML defaults. **Use global card template** in the action menu removes a repository override.
+
+![Rundown template chooser with preset and duration controls, live preview, and collapsed Customize options](docs/images/tui-template.png)
 
 You can also configure defaults in `config/rundown.local.toml`:
 
@@ -166,6 +184,8 @@ Start with `rd tui --config config/rundown.local.toml`. Section lists set both v
 Available sections: `what_it_is`, `analogy`, `use_cases`, `personal_fit`, `interest`, `how_it_works`, `practical_uses`, `strengths`, `risks`, `setup`, `maturity`, `questions`, `recommendation`, `hook`, `why_now`, `talking_points`, `demo`, and `sources`. Lists must be nonempty, contain unique known IDs, and use preview limits of 10–1,000 words. Segment targets range from 15 to 3,600 seconds.
 
 New research is validated as a versioned record of named fields and also exported as Markdown. Existing research history is retained. Card preferences and host notes live in the same local SQLite catalog; host notes are not sent to the research provider.
+
+The TUI, `rd research`, and `rd research-missing` use the same research workflow. It checks the saved cache first, clones only when research is actually needed, resolves the same effective template, and uses the same force-refresh and cancellation rules. This keeps interactive and batch results consistent; completed results remain saved if a later batch item is cancelled.
 
 ## Catalog views and research jobs
 
@@ -209,9 +229,11 @@ provider = "auto"
 profile = "Describe the projects, languages, and constraints relevant to you."
 ```
 
-Valid providers are `auto`, `claude`, `gemini`, and `codex`. Rundown does not override a model, so each CLI uses its configured default.
+Harness selectors are `auto`, `claude`, `gemini`, `codex`, `opencode`, and explicitly configured custom names. The default automatic order remains Claude, Gemini, Codex. Use `research.fallback` to change it and optional `research.model` for supported model overrides. Existing harnesses retain their configured defaults when model is omitted; isolated OpenCode requires an explicit model. See [research harness configuration, safety, and provenance](docs/research-harnesses.md) and [compatibility testing](docs/harness-testing.md).
 
 ## Export for presentation
+
+Press `x` in the TUI to export either the selected repository or all repositories marked `present` or `shortlist`. Choose the output path explicitly. Rundown refuses to replace an existing file until **Replace existing file** is enabled, then reports the exported count and path.
 
 Mark repositories you want to present:
 

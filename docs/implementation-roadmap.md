@@ -32,3 +32,17 @@ Run targeted unit and Textual interaction tests per lane, the full suite, typech
 ## Main risks
 
 Settings resolution can drift between UI/research/export: use one effective-settings helper. Cancellation can race completion: check at every stage and before persistence, and keep previous results. Schema changes can affect old catalogs: cover migrations from legacy tables. UI focus can be stolen by closing/recomposing controls: test Enter, Escape, cancel and modal completion explicitly.
+
+## Simplified daily workflow
+
+Tracking: issues #17–#21
+
+| Issue | Result | Main modules |
+| --- | --- | --- |
+| #17 | Browse → Read → Prepare → Export action row and local TUI export | tui.py, export_ui.py, export.py |
+| #18 | Three basic template presets and duration, with advanced settings under Customize | template_ui.py |
+| #19 | One atomic editor for presentation overrides, host notes, and repository notes | presentation.py, card_edit_ui.py |
+| #20 | One cache/clone/provider workflow shared by TUI, single, and batch research | research_workflow.py, cli.py, tui.py |
+| #21 | Bare `rd` app launch and first-run Try demo / Connect GitHub choice | startup.py, cli.py |
+
+The primary path stays on the main screen. Enter reads, `e` prepares the complete human-authored layer, `n` opens that editor at Host notes, and `x` exports. Generated sections remain read-only. Resetting an override reveals the generated section again without mutating the research log. Explicit CLI commands remain available for scripting, and noninteractive no-argument use does not launch the TUI.

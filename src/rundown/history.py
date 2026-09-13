@@ -14,8 +14,17 @@ def research_history(
     repo_id: int,
     *,
     limit: int = 2,
+    include_failed: bool = False,
 ) -> list[sqlite3.Row]:
-    return db.latest_successful_research_history(conn, repo_id, limit=limit)
+    successful = db.latest_successful_research_history(conn, repo_id, limit=limit)
+    if not include_failed:
+        return successful
+    failed = conn.execute(
+        "SELECT * FROM research_logs WHERE repo_id = ? AND status = 'failed' "
+        "AND pass_type = 'Repository Understanding' "
+        "ORDER BY id DESC LIMIT ?", (repo_id, limit),
+    ).fetchall()
+    return [*failed, *successful]
 
 
 def parse_provenance(row: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -117,6 +126,20 @@ def _section_diffs(
 
 
 def format_research_history(rows: Sequence[Mapping[str, Any]]) -> str:
+    failures = [row for row in rows if dict(row).get("status") == "failed"]
+    if failures:
+        blocks = []
+        for row in failures:
+            provenance = parse_provenance(row) or {}
+            attempts = provenance.get("attempts") or []
+            blocks.append(f"Failed research: {row['timestamp'] or 'unknown time'}")
+            blocks.extend(
+                f"  {item.get('harness', 'unknown')}: {item.get('reason', 'unknown')}"
+                + (f" ({item['detail']})" if item.get("detail") else "")
+                for item in attempts if isinstance(item, dict)
+            )
+        blocks.append(format_research_history([row for row in rows if dict(row).get("status") != "failed"]))
+        return "\n".join(blocks)
     if not rows:
         return "Research history: unavailable."
 
@@ -152,6 +175,14 @@ def format_research_history(rows: Sequence[Mapping[str, Any]]) -> str:
         lines.extend(
             [
                 f"Provider: {provider}",
+                f"Harness: {provenance.get('harness') or provider}",
+                f"Requested model: {provenance.get('requested_model') or 'CLI default / unknown'}",
+                f"Actual model: {provenance.get('actual_model') or 'unknown'}",
+                "Attempts: " + (", ".join(
+                    f"{item.get('harness', 'unknown')}: {item.get('reason', 'unknown')}"
+                    + (f" ({item['detail']})" if item.get("detail") else "")
+                    for item in (provenance.get('attempts') or []) if isinstance(item, dict)
+                ) or "unknown"),
                 f"Generated: {provenance.get('generated_at') or latest['timestamp'] or 'unknown'}",
                 f"Repository commit: {commit}",
                 f"Working tree: {worktree}",

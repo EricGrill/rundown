@@ -216,7 +216,7 @@ def test_cancel_during_cache_lookup_rolls_back_transaction(tmp_path):
 
         async with app.run_test() as pilot:
             await app.workers.wait_for_complete()
-            with patch("rundown.tui.research.load_cached_repository_research", side_effect=cached):
+            with patch("rundown.research_workflow.research.load_cached_repository_research", side_effect=cached):
                 app.enqueue_repo_action("research", "owner/one")
                 await app.workers.wait_for_complete()
                 await pilot.pause()

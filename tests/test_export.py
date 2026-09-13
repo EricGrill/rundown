@@ -148,6 +148,19 @@ def test_generate_export_empty():
     assert "No repositories marked for presentation" in result
 
 
+def test_build_export_accepts_explicit_rows_without_writing(tmp_path):
+    database = tmp_path / "app.sqlite"
+    seed_repos(database, with_card=True)
+    with db.session(database) as conn:
+        db.init_db(conn)
+        row = db.get_repo(conn, "owner/present-repo")
+        content = export.build_export(conn, [row], config=AppConfig(root=tmp_path))
+
+    assert "owner/present-repo" in content
+    assert "owner/shortlist-repo" not in content
+    assert "Fast and simple" in content
+
+
 def test_list_repos_by_decision(tmp_path):
     database = tmp_path / "app.sqlite"
     seed_repos(database)
@@ -525,3 +538,28 @@ def test_db_card_fields_migration(tmp_path):
 
     for field in ("hook", "who_for", "problem", "why_now", "demo_path"):
         assert field in columns
+
+
+def test_legacy_invalid_view_falls_back_to_effective_template(tmp_path):
+    config = AppConfig(root=tmp_path)
+    seed_repos(config.database_path)
+    with db.session(config.database_path) as conn:
+        repo = db.get_repo(conn, "owner/present-repo")
+        conn.execute("INSERT INTO repo_cards (repo_id, view) VALUES (?, ?)", (repo["id"], "legacy-bad-view"))
+        content = export.build_export(conn, [repo], config=config)
+    assert "owner/present-repo" in content
+
+
+def test_cli_export_atomic_failure_keeps_previous_export(tmp_path):
+    from unittest.mock import patch
+
+    config = AppConfig(root=tmp_path)
+    seed_repos(config.database_path)
+    output = tmp_path / "show.md"
+    output.write_text("previous show")
+    with db.session(config.database_path) as conn:
+        with patch("rundown.export.os.replace", side_effect=OSError("disk error")):
+            with pytest.raises(OSError, match="disk error"):
+                export.export_to_file(conn, output, config=config)
+    assert output.read_text() == "previous show"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["data", "show.md"]
