@@ -79,6 +79,14 @@ References: [CLI](https://opencode.ai/docs/cli/),
 [run event implementation](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/cli/cmd/run.ts),
 [managed configuration](https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/config/managed.ts).
 
+## Hermes and aider status
+
+Hermes and aider are not registered built-ins. Their proposed restricted wrappers
+did not pass the startup-isolation review. This is tracked in
+[issue #23](https://github.com/EricGrill/rundown/issues/23), with
+[verified findings and opt-in offline audit tests](safe-wrappers.md). Do not treat
+an empty CLI tool list or ask mode as a verified deny-all execution boundary.
+
 ## Custom commands
 
 ```toml
