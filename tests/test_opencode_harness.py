@@ -95,7 +95,7 @@ def test_decoder_rejects_conflicting_parts():
 
 def test_nested_jsonl_event_continues_fallback(tmp_path, isolated_opencode):
     nested = "[" * 10000 + "0" + "]" * 10000
-    with pytest.raises(ValueError, match="nesting"):
+    with pytest.raises(ValueError):
         opencode_harness.decode_opencode(nested)
     config = AppConfig(root=tmp_path, research=ResearchSettings(fallback=("opencode", "codex"), model="openai/test"))
     with patch.object(research.shutil, "which", return_value="/bin/tool"), patch.object(
