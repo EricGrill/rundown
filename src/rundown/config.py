@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .harnesses import CustomHarnessSettings, selected_harnesses
+
 from .cards import HOST_SECTIONS, RESEARCH_SECTIONS, SECTION_TITLES
 
 
@@ -46,6 +48,13 @@ class ResearchSettings:
     )
     timeout_seconds: int = 180
     max_context_chars: int = 60000
+    model: str | None = None
+    fallback: tuple[str, ...] = ("claude", "gemini", "codex")
+    custom: dict[str, CustomHarnessSettings] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        selected_harnesses(self)
+        object.__setattr__(self, "fallback", tuple(self.fallback))
 
 
 @dataclass(frozen=True)
@@ -231,6 +240,19 @@ def _card_settings(data: dict[str, object]) -> CardSettings:
     )
 
 
+def _custom_harnesses(raw: object) -> dict[str, CustomHarnessSettings]:
+    if not isinstance(raw, dict):
+        raise ValueError("research.custom must be a table")
+    result = {}
+    for name, value in raw.items():
+        if not isinstance(value, dict) or set(value) - {"executable", "args", "prompt", "output"}:
+            raise ValueError("Invalid research.custom settings")
+        if "executable" not in value:
+            raise ValueError("custom executable is required")
+        result[name] = CustomHarnessSettings(**value)
+    return result
+
+
 def load_config(config_path: Path | None = None) -> AppConfig:
     path = config_path or Path("config/rundown.toml")
     root = path.parent.parent.resolve() if path.exists() else Path.cwd().resolve()
@@ -241,7 +263,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     github = _table(data, "github")
     scoring = _table(data, "scoring")
     execution = _table(data, "execution")
-    research = _table(data, "research")
+    research = data.get("research", {})
+    if not isinstance(research, dict):
+        raise ValueError("research must be a table")
+    if set(research) - {"provider", "model", "fallback", "custom", "profile", "timeout_seconds", "max_context_chars"}:
+        raise ValueError("Unknown research settings")
     tui = _table(data, "tui")
 
     return AppConfig(
@@ -263,7 +289,10 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             timeout_seconds=int(execution.get("timeout_seconds", 120)),
         ),
         research=ResearchSettings(
-            provider=str(research.get("provider", "auto")),
+            provider=research.get("provider", "auto"),
+            model=research.get("model"),
+            fallback=research.get("fallback", ("claude", "gemini", "codex")),
+            custom=_custom_harnesses(research.get("custom", {})),
             profile=str(research.get("profile", ResearchSettings().profile)),
             timeout_seconds=int(research.get("timeout_seconds", 180)),
             max_context_chars=int(research.get("max_context_chars", 60000)),
