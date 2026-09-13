@@ -30,3 +30,18 @@ Failures use `ok:false` and `error:{code,message}`. Exit codes: `0` success (inc
 Local read commands open existing SQLite catalogs read-only without migrations or application directory creation. SQLite may create or use `-wal`/`-shm` coordination files beside an existing WAL database; readers preserve committed WAL data rather than ignoring it. Missing databases are treated as empty catalogs. Unsupported core schemas report `incompatible_catalog`; missing optional legacy fields are treated as unavailable.
 
 Search defaults to 5 results, catalog JSON to 100; both accept limits from 1 to 100. Catalog listing reports `total_count` and `truncated`. Human `rd repos` output remains the existing table; its `--limit` applies only to JSON output. Search reports retrieval bounds and truncation separately: a bounded corpus match is not a guarantee that no other relevant repository exists.
+
+## Inspect saved evidence and research gaps
+
+```bash
+rd inspect owner/repository --json
+rd inspect owner/repository --full --json
+rd research owner/repository --json
+rd research owner/repository --force --json
+```
+
+Inspection separates repository metadata, generated research, supplied source context/provenance, human notes, project mappings, unknowns and staleness. Generated references are explicitly unverified. An invalid saved timestamp is treated conservatively rather than reported current. Missing optional legacy fields remain readable; malformed/deeply nested saved structured data falls back to the saved report where possible and exposes diagnostics.
+
+Compact inspection caps text fields and has a 50,000-character text budget. `--full` exposes more saved text, with a 1,000,000-character absolute text budget. Project mappings and JSON structure also have limits. The `truncation` object identifies omitted/shortened content; `--full` is not an unlimited dump. Use the original local Markdown files for reports exceeding these bounds.
+
+`research` is an explicit live operation: it requires a catalog entry, reuses an applicable saved cache, and otherwise clones as needed and invokes your configured AI provider. `--force` bypasses that cache. It uses the same research workflow and effective template as the TUI. Machine output reports success/cached/failure/cancellation; its summary is capped at 20,000 characters, with `summary_truncated` and the complete saved report available through inspection/storage. Provider failure exits 1, cancellation exits 130, and previous successful research remains available. Unknown targets fail before creating directories.
