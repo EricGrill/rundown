@@ -151,8 +151,14 @@ def test_custom_json_model_is_reported_not_inferred():
 
 
 def test_custom_json_rejects_excessive_nesting():
-    with pytest.raises(ValueError, match="nesting"):
+    # CPython 3.14 can parse this depth; it must still reject a non-envelope.
+    with pytest.raises(ValueError):
         harnesses.decode_json("[" * 10000 + "0" + "]" * 10000)
+
+
+def test_custom_json_normalizes_parser_recursion_failure():
+    with patch.object(harnesses.json, "loads", side_effect=RecursionError), pytest.raises(ValueError, match="nesting"):
+        harnesses.decode_json("[]")
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
