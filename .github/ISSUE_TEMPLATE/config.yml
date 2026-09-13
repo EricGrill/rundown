@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/EricGrill/rundown#readme
+    about: Check the README for usage and configuration
+  - name: Install guide
+    url: https://github.com/EricGrill/rundown/blob/main/docs/install.md
+    about: Installation, upgrades, and release instructions
