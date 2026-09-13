@@ -362,7 +362,10 @@ def generate_repository_research(
     for adapter in selected_harnesses(config.research):
         check_cancelled(cancel_event)
         reason = ""
-        if shutil.which(adapter.executable) is None:
+        preflight = adapter.preflight(config.research.model) if adapter.preflight else None
+        if preflight:
+            reason = "preflight_failed"
+        elif shutil.which(adapter.executable) is None:
             reason = "missing_executable"
         else:
             try:
@@ -376,7 +379,9 @@ def generate_repository_research(
                         run_kwargs["stdin"] = subprocess.DEVNULL
                     else:
                         run_kwargs["input"] = invocation.input
-                    if invocation.env:
+                    if not invocation.inherit_env:
+                        run_kwargs["env"] = invocation.env
+                    elif invocation.env:
                         run_kwargs["env"] = {**os.environ, **invocation.env}
                     result = run_command(invocation.argv, cancel_event=cancel_event, **run_kwargs)
                 check_cancelled(cancel_event)
@@ -404,12 +409,15 @@ def generate_repository_research(
                 reason = "launch_error"
         check_cancelled(cancel_event)
         attempts.append({"harness": adapter.identifier, "reason": reason})
+        if preflight:
+            attempts[-1]["detail"] = preflight
         descriptions = {
             "missing_executable": "is not installed",
             "nonzero_exit": "failed: nonzero exit",
             "invalid_output": "returned incomplete research",
             "timeout": f"exceeded the {config.research.timeout_seconds}s timeout",
             "launch_error": "could not be launched",
+            "preflight_failed": f"cannot run: {preflight}",
         }
         failures.append(f"{adapter.identifier} {descriptions[reason]}")
     raise ResearchAgentError(
