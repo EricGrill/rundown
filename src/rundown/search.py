@@ -8,6 +8,7 @@ import sqlite3
 from typing import Any, Collection, Iterator
 
 from .agent_io import AgentError, validate_limit
+from .memory import search_decision_text
 
 
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
@@ -40,6 +41,7 @@ _FIELD_WEIGHTS = {
     "why_now": 5.0,
     "demo_path": 4.0,
     "research": 3.0,
+    "decision_memory": 5.0,
 }
 
 
@@ -320,6 +322,7 @@ def search_repositories(
         candidate_ids = [int(row["id"]) for row in chunk]
         research = _latest_research(conn, candidate_ids, text_cap=_MAX_FIELD_CHARS)
         notes = _host_notes(conn, candidate_ids)
+        decisions = search_decision_text(conn, candidate_ids)
         for row in chunk:
             data = dict(row)
             repo_id = int(data["id"])
@@ -340,6 +343,7 @@ def search_repositories(
                 "demo_path": str(data.get("demo_path") or ""),
                 "host_notes": notes.get(repo_id, ""),
                 "research": str(_value(latest, "summary", "")) if latest else "",
+                "decision_memory": decisions.get(repo_id, ""),
             }
             fields = {name: text[:_MAX_FIELD_CHARS] for name, text in raw_fields.items()}
             repo_text_chars = sum(len(text) for text in fields.values())
@@ -404,7 +408,7 @@ def search_repositories(
                     score += 100.0
                 kinds = {
                     name: (
-                        "generated"
+                        "decision_memory" if name == "decision_memory" else "generated"
                         if name == "research"
                         else "human"
                         if name in {

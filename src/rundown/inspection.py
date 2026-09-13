@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any, Mapping
 
 from .agent_io import AgentError
+from .memory import recall_decisions
 from .cards import CardRecord, record_from_saved
 
 
@@ -415,6 +416,7 @@ def inspect_repository(
         "generated_research": generated,
         "source_references": source_references,
         "project_mappings": mappings,
+        "decision_memory": recall_decisions(conn, full_name=full_name.strip(), limit=20 if full else 5),
     }
     total_limit = _FULL_TOTAL_TEXT_CHARS if full else _COMPACT_TOTAL_TEXT_CHARS
     packet = _enforce_total_text_cap(packet, [total_limit], "", truncated)
