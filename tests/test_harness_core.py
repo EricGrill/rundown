@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -228,6 +229,22 @@ def test_real_custom_stdin_and_json_metadata(tmp_path):
     assert result.text == REPORT
     assert result.harness == "local"
     assert result.actual_model == "reported"
+
+
+def test_large_custom_stdin_completes_with_delayed_reader(tmp_path):
+    prompt = REPORT + "\n" + "Large Unicode context: 漢字 café\n" * 20000
+    expected = hashlib.sha256(prompt.encode()).hexdigest()
+    code = (
+        "import sys,time,hashlib; time.sleep(0.3); "
+        f"assert hashlib.sha256(sys.stdin.buffer.read()).hexdigest() == {expected!r}; "
+        f"print({REPORT!r})"
+    )
+    settings = ResearchSettings(provider="local", timeout_seconds=5, custom={
+        "local": CustomHarnessSettings(sys.executable, ("-c", code)),
+    })
+    result = research.generate_repository_research(AppConfig(root=tmp_path, research=settings), prompt, tmp_path)
+    assert result == REPORT
+    assert not any(thread.name == "rundown-subprocess-io" for thread in threading.enumerate())
 
 
 @pytest.mark.parametrize("text", ['research = "bad"', '[research]\nunknown = true', '[research.custom.local]\nargs = []'])
