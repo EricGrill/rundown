@@ -127,6 +127,12 @@ Search saved metadata, research and notes without opening the TUI or calling a p
 ```bash
 rd search "background jobs python" --json --limit 5
 rd repos --project "My app" --json
+rd inspect owner/repository --json
+rd discover "background jobs language:Python" --json
+rd recall --project "My app" --json
+rd digest --project "My app" --json
+rd refresh --dry-run --limit 5 --json
+rd mcp
 ```
 
 Results explain their matches; new JSON commands use a versioned envelope and explicit error exit codes. See the [agent CLI guide](docs/agent-cli.md) for output contracts and integration examples.

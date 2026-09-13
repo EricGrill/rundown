@@ -28,7 +28,7 @@ from .demo import demo_environment
 from .doctor import run_doctor
 from .config import AppConfig, load_config
 from .tui import RundownApp
-from . import search_cli, inspect_cli, discovery_cli, memory_cli
+from . import search_cli, inspect_cli, discovery_cli, memory_cli, automation_cli
 from .agent_catalog import catalog_repositories
 from .agent_io import AgentError, emit, load_agent_config, read_catalog, run_command
 from .processes import OperationCancelled
@@ -40,6 +40,7 @@ search_cli.register(app)
 inspect_cli.register(app)
 discovery_cli.register(app)
 memory_cli.register(app)
+automation_cli.register(app)
 
 
 class RepoDecision(str, Enum):
