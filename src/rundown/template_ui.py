@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Markdown, Select, Static
+from textual.widgets import Button, Collapsible, Input, Markdown, Select, Static
 
 from .cards import CardRecord, HOST_SECTIONS, RESEARCH_SECTIONS, SECTION_TITLES, section_preview
 from .config import CardSettings, CardTemplateSettings
@@ -49,6 +49,13 @@ PRESETS: dict[str, CardSettings] = {
     ),
 }
 
+PRESET_OPTIONS = [
+    ("Current settings", "custom"),
+    ("Quick overview", "discovery"),
+    ("Deep research", "deep_dive"),
+    ("Show segment", "live_demo"),
+]
+
 
 class TemplateScreen(ModalScreen[TemplateResult | None]):
     """Edit global or per-repository cards without invoking a provider."""
@@ -66,6 +73,9 @@ class TemplateScreen(ModalScreen[TemplateResult | None]):
     .template-row > * { width: 1fr; margin-right: 1; }
     #template-body { height: 1fr; }
     #template-fields { width: 1fr; min-width: 42; padding-right: 1; }
+    #template-customize { height: auto; margin-top: 1; }
+    #template-customize-options { height: auto; padding: 0 1; }
+    #template-scope-summary { height: auto; color: $text-muted; }
     #template-preview-pane { width: 1fr; min-width: 36; border-left: solid $panel; padding-left: 2; }
     #template-preview { height: 1fr; }
     #template-section-list { height: auto; min-height: 3; color: $text-muted; margin-bottom: 1; }
@@ -103,44 +113,60 @@ class TemplateScreen(ModalScreen[TemplateResult | None]):
         with VerticalScroll(id="template-dialog"):
             yield Static("Research card templates", id="template-title")
             yield Static(
-                "Choose a preset or edit the profile. Preview uses saved research only. Ctrl+S saves · Esc cancels.",
+                "Choose a starting point and duration. Preview uses saved research only. Ctrl+S saves · Esc cancels.",
                 classes="template-hint",
             )
-            with Horizontal(classes="template-row"):
-                yield Select(
-                    [("Custom", "custom"), ("60-second discovery", "discovery"), ("Technical deep dive", "deep_dive"), ("Live demo", "live_demo")],
-                    value="custom",
-                    id="template-preset",
-                )
-                yield Select(
-                    [("Host brief", "host"), ("Research card", "research")],
-                    value=self.settings.default_view,
-                    id="template-view",
-                )
-                scope_options = [("Global default", "global")]
-                if self.repo_name:
-                    scope_options.append((f"Only {self.repo_name}", "repo"))
-                yield Select(scope_options, value="repo" if self.repo_name else "global", id="template-scope")
             with Horizontal(id="template-body"):
                 with VerticalScroll(id="template-fields"):
-                    yield Static("Audience", classes="template-hint")
-                    yield Input(self.settings.audience, placeholder="Audience", id="template-audience")
-                    yield Static("Tone", classes="template-hint")
-                    yield Input(self.settings.tone, placeholder="Tone", id="template-tone")
-                    yield Static("Target seconds · Preview words per section", classes="template-hint")
-                    with Horizontal(classes="template-row"):
-                        yield Input(str(self.settings.duration_seconds), type="integer", placeholder="Duration seconds", id="template-duration")
-                        yield Input(str(self._active_template().word_limit), type="integer", placeholder="Preview words", id="template-words")
-                    yield Select(
-                        [(title, section_id) for section_id, title in SECTION_TITLES.items()],
-                        value=self._sections[self.settings.default_view][0],
-                        id="template-section",
+                    yield Static("Template", classes="template-hint")
+                    yield Select(PRESET_OPTIONS, value="custom", id="template-preset")
+                    yield Static("Target duration in seconds", classes="template-hint")
+                    yield Input(
+                        str(self.settings.duration_seconds),
+                        type="integer",
+                        placeholder="Duration seconds",
+                        id="template-duration",
                     )
-                    with Horizontal(classes="template-row"):
-                        yield Button("Toggle", id="template-toggle")
-                        yield Button("Move up", id="template-up")
-                        yield Button("Move down", id="template-down")
-                    yield Static(id="template-section-list")
+                    yield Static(self._scope_summary(), id="template-scope-summary")
+                    with Collapsible(title="Customize", collapsed=True, id="template-customize"):
+                        with Vertical(id="template-customize-options"):
+                            yield Static("Card shown by default", classes="template-hint")
+                            yield Select(
+                                [("Host brief", "host"), ("Research card", "research")],
+                                value=self.settings.default_view,
+                                id="template-view",
+                            )
+                            yield Static("Audience", classes="template-hint")
+                            yield Input(self.settings.audience, placeholder="Audience", id="template-audience")
+                            yield Static("Tone", classes="template-hint")
+                            yield Input(self.settings.tone, placeholder="Tone", id="template-tone")
+                            yield Static("Preview words per section", classes="template-hint")
+                            yield Input(
+                                str(self._active_template().word_limit),
+                                type="integer",
+                                placeholder="Preview words",
+                                id="template-words",
+                            )
+                            yield Static("Visible sections and order", classes="template-hint")
+                            yield Select(
+                                [(title, section_id) for section_id, title in SECTION_TITLES.items()],
+                                value=self._sections[self.settings.default_view][0],
+                                id="template-section",
+                            )
+                            with Horizontal(classes="template-row"):
+                                yield Button("Toggle", id="template-toggle")
+                                yield Button("Move up", id="template-up")
+                                yield Button("Move down", id="template-down")
+                            yield Static(id="template-section-list")
+                            yield Static("Save changes for", classes="template-hint")
+                            scope_options = [("Global default", "global")]
+                            if self.repo_name:
+                                scope_options.append((f"Only {self.repo_name}", "repo"))
+                            yield Select(
+                                scope_options,
+                                value="repo" if self.repo_name else "global",
+                                id="template-scope",
+                            )
                     yield Static(id="template-error")
                 with Vertical(id="template-preview-pane"):
                     yield Static("Live preview", classes="template-hint")
@@ -153,7 +179,7 @@ class TemplateScreen(ModalScreen[TemplateResult | None]):
         self.set_class(self.size.width < 90, "compact")
         self._refresh_sections()
         self._refresh_preview()
-        self.query_one("#template-audience", Input).focus()
+        self.query_one("#template-preset", Select).focus()
 
     def on_resize(self) -> None:
         self.set_class(self.size.width < 90, "compact")
@@ -161,6 +187,12 @@ class TemplateScreen(ModalScreen[TemplateResult | None]):
     def _active_view(self) -> str:
         value = self.query_one("#template-view", Select).value
         return value if isinstance(value, str) and value in {"host", "research"} else self.settings.default_view
+
+    def _scope_summary(self, scope: str | None = None) -> str:
+        active_scope = scope or ("repo" if self.repo_name else "global")
+        if active_scope == "repo" and self.repo_name:
+            return f"Active scope: only {self.repo_name}"
+        return "Active scope: global default"
 
     def _active_template(self) -> CardTemplateSettings:
         return self.settings.host if self.settings.default_view == "host" else self.settings.research
@@ -230,6 +262,11 @@ class TemplateScreen(ModalScreen[TemplateResult | None]):
         if event.select.id in {"template-preset", "template-view"}:
             self._refresh_sections()
             self._refresh_preview()
+        if event.select.id == "template-scope":
+            scope = event.value if isinstance(event.value, str) else None
+            self.query_one("#template-scope-summary", Static).update(
+                self._scope_summary(scope)
+            )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self.is_mounted:

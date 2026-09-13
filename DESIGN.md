@@ -88,3 +88,11 @@
 - Catalog views: status, category, sort and stale threshold are visible and named views are stored locally.
 - Jobs: text states and elapsed times, selected-job Retry/Cancel, terminal states retained for inspection; never hide failures behind a spinner.
 - New modal content must scroll at 80x24, with accessible actions and no horizontal overflow. Normal browsing and unrelated jobs stay usable while research runs.
+
+## Simplification contract (issues #17–#21)
+- Primary path: Browse → Read → Prepare → Export. Keep a compact, contextual action row; maintenance remains in Ctrl+P. Enter continues to read, never opens an editor implicitly.
+- Prepare opens one editor for human presentation overrides and host notes. Generated source is read-only and clearly labeled. Reset removes the chosen override; it never changes research or unrelated notes. Cancel never writes.
+- Template basics show Quick overview, Deep research, Show segment and duration. Customize reveals advanced settings. Saving basic settings preserves every hidden value and the current repository/global scope; show the active scope in the summary.
+- Export is available inside the TUI for the selected repository or marked repositories. Reuse the card/export formatter, let the user choose a local path, explicitly confirm existing-file replacement, and show the resulting count/path. Demo cannot write outside its temporary directory.
+- Bare rd opens the app in an interactive terminal. An empty first-run catalog offers Try demo or Connect GitHub; existing catalogs open directly. Keep --help and explicit commands usable in scripts. Never launch authentication or providers implicitly.
+- Reuse Textual widgets, the existing theme, 80x24 scrollable modals, and stable focus/selection. No new design system or runtime dependency.

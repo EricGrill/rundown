@@ -8,7 +8,6 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from time import monotonic
-from typing import Any
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -27,13 +26,15 @@ from textual.widgets import (
     Static,
 )
 
-from . import categories, db, github, history, preferences, repo_ops, research
-from .card_ui import CardDisclosure, CardSections, HostNotesScreen
+from . import categories, db, export, github, history, preferences, presentation, research_workflow
+from .card_ui import CardDisclosure, CardSections
+from .card_edit_ui import CardEditScreen
 from .cards import record_from_saved
 from .config import AppConfig
 from .catalog import CatalogView, SORTS, filter_sort_repos
 from .catalog_ui import CatalogResult, CatalogScreen
 from .db import init_db, list_repos, session
+from .export_ui import ExportRequest, ExportScreen, write_export_file
 from .jobs import ResearchJob
 from .jobs_ui import JobsScreen
 from .processes import OperationCancelled, check_cancelled
@@ -59,6 +60,8 @@ class RepositoryCommands(Provider):
             yield "Edit card template", app.action_edit_template, "t · Presets, sections, preview and saved defaults."
             yield "Use global card template", app.action_reset_template, "Remove this repository's template override."
             yield "Research provenance and changes", app.action_show_history, "h · Sources, provider, commit and changes since the previous report."
+            yield "Prepare card", app.action_prepare, "e · Edit your presentation overrides and notes together."
+            yield "Export card", app.action_export_card, "x · Export the selected card or marked repositories to Markdown."
             yield "Read selected repository", app.action_read_selected, "Enter · Focus the reader; use arrows or Page Down to scroll."
             yield "Open repository on GitHub", app.action_open_github, "Open the selected repository in your browser."
             row = app.selected_row()
@@ -89,9 +92,11 @@ class RepositoryCommands(Provider):
 
 class RundownApp(App):
     TITLE = "Rundown"
-    SUB_TITLE = "Browse · Research · Read"
+    SUB_TITLE = "Browse · Read · Prepare · Export"
     COMMANDS = {RepositoryCommands}
     CSS = """
+    #workflow-actions { height: 3; }
+    #workflow-actions Button { width: 1fr; min-width: 12; }
     #body { height: 1fr; }
     #catalog { width: 46%; min-width: 36; }
     #search { margin: 0 1; }
@@ -103,7 +108,6 @@ class RundownApp(App):
     #detail { height: auto; margin-bottom: 1; }
     #card-toolbar { height: auto; }
     #card-view { width: 1fr; }
-    #edit-notes { min-width: 14; width: auto; }
     #card-context { height: auto; color: $text-muted; margin: 1 0; }
     #host-notes { height: auto; }
     #host-notes-panel, #full-research { height: auto; margin: 0 0 1 0; padding: 0; border: none; }
@@ -127,6 +131,8 @@ class RundownApp(App):
         Binding("v", "switch_card", "View"),
         Binding("n", "edit_host_notes", "Notes", show=False),
         Binding("j", "show_jobs", "Jobs", show=False),
+        Binding("e", "prepare", "Prepare", show=False),
+        Binding("x", "export_card", "Export", show=False),
         Binding("t", "edit_template", "Templates", show=False),
         Binding("g", "catalog_view", "Views", show=False),
         Binding("h", "show_history", "History", show=False),
@@ -169,6 +175,11 @@ class RundownApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        with Horizontal(id="workflow-actions"):
+            yield Button("Browse", id="workflow-browse")
+            yield Button("Read · Enter", id="workflow-read", disabled=True)
+            yield Button("Prepare · e", id="workflow-prepare", disabled=True)
+            yield Button("Export · x", id="workflow-export", disabled=True)
         with Horizontal(id="body"):
             with Vertical(id="catalog"):
                 yield Input(placeholder="Find a repository…", id="search")
@@ -185,9 +196,9 @@ class RundownApp(App):
                     yield Select([("Host brief", "host"), ("Research card", "research")],
                                  value=self.card_view, allow_blank=False, id="card-view",
                                  tooltip="Switch card view · v")
-                    yield Button("Host notes", id="edit-notes", tooltip="Edit host notes · n")
                 yield Static("", id="card-context", markup=False)
                 yield CardSections(id="card-sections")
+                yield Markdown(id="human-fields", open_links=False)
                 with CardDisclosure(title="Host notes · n to edit", collapsed=True, id="host-notes-panel"):
                     yield Static("No host notes yet.", id="host-notes", markup=False)
                 with CardDisclosure(title="Full research", collapsed=True, id="full-research"):
@@ -207,6 +218,7 @@ class RundownApp(App):
         for selector in self.query(Select):
             self.watch(selector, "expanded", partial(self.return_from_dropdown, selector), init=False)
         self.action_sync()
+        self.update_job_summary()
         self.set_interval(1, self.update_job_summary)
 
     def return_from_dropdown(self, selector: Select, expanded: bool) -> None:
@@ -260,6 +272,17 @@ class RundownApp(App):
         self.rows.sort(key=lambda row: row["starred_at"] or "", reverse=True)
         self.rows_by_full_name = {row["full_name"]: row for row in self.rows}
         self.filter_rows(selected_full_name)
+        self.update_workflow_actions()
+
+    def update_workflow_actions(self) -> None:
+        row = self.selected_row()
+        for action in ("read", "prepare", "export"):
+            self.query_one(f"#workflow-{action}", Button).disabled = row is None
+        button = self.query_one("#workflow-read", Button)
+        if row and row["id"] not in self.research_by_repo:
+            button.label = "Research · r"
+        else:
+            button.label = "Read · Enter"
 
     def filter_rows(self, selected_full_name: str | None = None) -> None:
         table = self.query_one("#repos", DataTable)
@@ -289,7 +312,9 @@ class RundownApp(App):
             self.query_one("#card-sections", CardSections).entries = ()
             self.query_one("#card-context", Static).update("")
             self.query_one("#host-notes", Static).update("No repository selected.")
+            self.query_one("#human-fields", Markdown).update("")
             self.query_one("#card-toolbar").disabled = True
+        self.update_workflow_actions()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search":
@@ -393,7 +418,8 @@ class RundownApp(App):
         self.query_one("#card-toolbar").disabled = False
         preference = self.card_preferences.get(row["id"], {})
         settings = self.effective_card_settings.get(row["id"], self.config.cards)
-        self.card_view = preference.get("view") or settings.default_view
+        saved_view = preference.get("view")
+        self.card_view = saved_view if saved_view in {"host", "research"} else settings.default_view
         selector = self.query_one("#card-view", Select)
         with selector.prevent(Select.Changed):
             selector.value = self.card_view
@@ -415,6 +441,7 @@ class RundownApp(App):
         if content.source != summary:
             content.update(summary)
         self.render_card(row, cached, changed_repo=changed_repo)
+        self.update_workflow_actions()
         if error:
             self.query_one("#full-research", Collapsible).collapsed = False
 
@@ -426,10 +453,19 @@ class RundownApp(App):
         settings = self.effective_card_settings.get(row["id"], self.config.cards)
         template = getattr(settings, self.card_view)
         missing = "Unknown from the available research."
-        self.query_one("#card-sections", CardSections).entries = tuple(
-            (section_id, record.sections.get(section_id) or missing, template.word_limit)
-            for section_id in template.sections
-        ) if cached else ()
+        entries = []
+        rendered_fields: set[str] = set()
+        for section_id in template.sections:
+            section = presentation.effective_section(row, record, section_id)
+            if cached or section.content:
+                entries.append((section_id, section.content or missing, template.word_limit))
+                rendered_fields.update(section.overridden_fields)
+        self.query_one("#card-sections", CardSections).entries = tuple(entries)
+        extra = [f"### {field.label} (your override)\n\n{field.value}"
+                 for field in presentation.supplemental_human_fields(row, rendered_fields)]
+        if row["notes"]:
+            extra.append(f"### Repository notes\n\n{row['notes']}")
+        self.query_one("#human-fields", Markdown).update("\n\n".join(extra))
         if self.card_view == "host":
             context = (
                 f"Target: {settings.duration_seconds} seconds · Demo not rehearsed\n"
@@ -474,36 +510,85 @@ class RundownApp(App):
         self.query_one("#reader", VerticalScroll).scroll_home(animate=False)
 
     def action_edit_host_notes(self) -> None:
+        self.open_card_editor(initial_field="host_notes")
+
+    def open_card_editor(self, *, initial_field: str = "hook") -> None:
         row = self.selected_row()
         if row is None:
             return
         repo_id, full_name = row["id"], row["full_name"]
         view = self.card_view
-        notes = self.card_preferences.get(repo_id, {}).get("host_notes", "")
+        cached = self.research_by_repo.get(repo_id)
+        record = record_from_saved(str(cached["summary"] or "") if cached else "",
+                                   cached["card_json"] if cached else None)
+        draft = presentation.draft_from_rows(row, self.card_preferences.get(repo_id))
 
-        def save_notes(value: str | None) -> None:
+        def save_card(value: presentation.PresentationDraft | None) -> None:
             if value is None:
                 return
             try:
                 with session(self.config.database_path) as conn:
                     conn.execute("PRAGMA busy_timeout = 100")
-                    db.save_repo_card(conn, repo_id, view=view, host_notes=value)
-            except sqlite3.Error as exc:
-                self.notify_result(f"Could not save notes: {exc}. Your draft is still open; retry Save or cancel.")
-                self.push_screen(HostNotesScreen(full_name, value), save_notes)
+                    conn.execute("BEGIN")
+                    presentation.save_presentation_draft(conn, repo_id, value)
+                    db.save_repo_card(conn, repo_id, view=view)
+            except (sqlite3.Error, LookupError) as exc:
+                self.notify_result(f"Could not save card: {exc}. Your draft is still open; retry Save or cancel.")
+                self.push_screen(CardEditScreen(full_name, value, record, initial_field=initial_field), save_card)
                 return
-            self.card_preferences.setdefault(repo_id, {})["host_notes"] = value
-            self.card_preferences[repo_id]["view"] = view
-            if self.selected_full_name() == full_name:
-                self.query_one("#host-notes", Static).update(value or "No host notes yet.")
-                self.query_one("#host-notes-panel", Collapsible).collapsed = not bool(value)
-            self.notify_result(f"Host notes saved for {full_name}.")
+            self.load_rows()
+            self.notify_result(f"Card saved for {full_name}.")
 
-        self.push_screen(HostNotesScreen(full_name, notes), save_notes)
+        self.push_screen(CardEditScreen(full_name, draft, record, initial_field=initial_field), save_card)
+
+    def action_browse(self) -> None:
+        self.remove_class("reading")
+        self.query_one("#repos", DataTable).focus()
+
+    def action_prepare(self) -> None:
+        self.open_card_editor()
+
+    def action_export_card(self) -> None:
+        row = self.selected_row()
+        if row is None:
+            return
+        name = row["full_name"]
+        selected_view = self.card_view
+
+        def submit(request: ExportRequest) -> str:
+            try:
+                with session(self.config.database_path) as conn:
+                    current = db.get_repo(conn, name)
+                    rows = ([current] if current is not None else []) if request.scope == "selected" else list(export.iter_export_rows(conn))
+                    if not rows:
+                        raise ValueError("No repositories to export. Mark a repository for presentation with p.")
+                    content = export.build_export(conn, rows, config=self.config, view=selected_view if request.scope == "selected" else None)
+            except sqlite3.Error as exc:
+                raise ValueError(f"Could not read the catalog: {exc}") from exc
+            path = write_export_file(request.path, content, overwrite=request.overwrite,
+                                     allowed_root=self.config.root if self.demo_mode else None,
+                                     protected_path=self.config.database_path)
+            return f"Exported {len(rows)} {'repository' if len(rows) == 1 else 'repositories'} to {path}"
+
+        def done(message: str | None) -> None:
+            if message:
+                self.notify_result(message)
+
+        self.push_screen(ExportScreen(name, self.config.exports_root / "rundown-export.md", submit, demo_mode=self.demo_mode), done)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "edit-notes":
-            self.action_edit_host_notes()
+        if event.button.id == "workflow-browse":
+            self.action_browse()
+        elif event.button.id == "workflow-read":
+            row = self.selected_row()
+            if row and row["id"] not in self.research_by_repo:
+                self.action_research_selected()
+            else:
+                self.action_read_selected()
+        elif event.button.id == "workflow-prepare":
+            self.action_prepare()
+        elif event.button.id == "workflow-export":
+            self.action_export_card()
 
     def action_sync(self) -> None:
         if self.sync_in_progress:
@@ -783,7 +868,6 @@ class RundownApp(App):
     @work(thread=True, group="repo-action", exit_on_error=False)
     def research_selected(self, full_name: str, *, force: bool = False, job: ResearchJob | None = None) -> None:
         cancel_event = job.cancel_event if job else None
-        clone_status = "already_cloned"
 
         def stage(state: str, message: str) -> None:
             check_cancelled(cancel_event)
@@ -794,32 +878,15 @@ class RundownApp(App):
             check_cancelled(cancel_event)
             with session(self.config.database_path) as conn:
                 init_db(conn)
-                row = db.get_repo(conn, full_name)
-                if row is None:
-                    raise ValueError(f"Unknown repository: {full_name}")
-                config = replace(self.config, cards=preferences.effective_cards(conn, self.config.cards, row["id"]))
-                cached = None if force else research.load_cached_repository_research(config, conn, row)
-                if cached is not None:
-                    status, summary = "cached", cached
-                else:
-                    stage("cloning", "Preparing the local repository copy.")
-                    clone_options: dict[str, Any] = {"cancel_event": cancel_event} if cancel_event is not None else {}
-                    clone_status, clone_message = repo_ops.clone_repo(config, conn, full_name, **clone_options)
-                    if clone_status == "failed":
-                        status, summary = "failed", f"Research stopped because the repository could not be cloned.\n\n{clone_message}"
-                    else:
-                        stage("researching", "Generating research with the configured provider.")
-                        options = dict(clone_options)
-                        if force:
-                            options["force"] = True
-                        status, summary = research.run_repository_research(config, conn, full_name, **options)
+                status, summary = research_workflow.research_repository(
+                    self.config, conn, full_name, force=force,
+                    cancel_event=cancel_event, on_stage=stage,
+                )
                 check_cancelled(cancel_event)
         except OperationCancelled:
             status, summary = "cancelled", "Cancelled. Previously saved research and host notes were preserved."
         except Exception as exc:
             status, summary = "failed", f"Research failed for {full_name}: {exc}"
-        if clone_status == "cloned" and status != "cancelled":
-            summary = f"Automatically cloned {full_name} before research.\n\n{summary}"
         if not self._closing:
             self.app.call_from_thread(self.finish_research, full_name, status, summary, job.id if job else None)
 

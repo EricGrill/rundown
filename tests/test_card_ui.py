@@ -6,7 +6,8 @@ import pytest
 from textual.widgets import Collapsible, Markdown, Select, Static, TextArea
 
 from rundown import cards, db
-from rundown.card_ui import CardSections, HostNotesScreen
+from rundown.card_ui import CardSections
+from rundown.card_edit_ui import CardEditScreen
 from rundown.config import AppConfig, CardTemplateSettings
 from rundown.tui import RundownApp
 
@@ -28,7 +29,7 @@ def test_switch_views_is_local_and_persists_per_repo(tmp_path):
 
     async def run():
         app = RundownApp(config, fetch_starred=list)
-        with patch('rundown.tui.research.run_repository_research') as generate:
+        with patch('rundown.research_workflow.research.run_repository_research') as generate:
             async with app.run_test(size=(140, 40)) as pilot:
                 await app.workers.wait_for_complete()
                 await pilot.pause()
@@ -62,7 +63,7 @@ def test_notes_save_cancel_and_research_refresh_are_independent(tmp_path):
         async with app.run_test(size=(120, 35)) as pilot:
             await app.workers.wait_for_complete()
             await pilot.press('n')
-            assert isinstance(app.screen, HostNotesScreen)
+            assert isinstance(app.screen, CardEditScreen)
             app.screen.query_one(TextArea).load_text('Mention the demo first.\nDo not lose this cue.')
             await pilot.press('ctrl+s')
             await pilot.pause()
@@ -78,7 +79,7 @@ def test_notes_save_cancel_and_research_refresh_are_independent(tmp_path):
             await pilot.press('escape')
             with db.session(config.database_path) as conn:
                 assert 'Do not lose this cue.' in db.get_repo_card(conn, repo_id)['host_notes']
-            assert not isinstance(app.screen, HostNotesScreen)
+            assert not isinstance(app.screen, CardEditScreen)
 
     asyncio.run(run())
 
@@ -152,9 +153,9 @@ def test_explicit_refresh_bypasses_cache_and_preserves_notes(tmp_path):
     async def run():
         app = RundownApp(config, fetch_starred=list)
         with (
-            patch('rundown.tui.research.load_cached_repository_research') as cached,
-            patch('rundown.tui.repo_ops.clone_repo', return_value=('already_cloned', 'ready')),
-            patch('rundown.tui.research.run_repository_research', return_value=('success', 'Fresh research')) as generate,
+            patch('rundown.research_workflow.research.load_cached_repository_research') as cached,
+            patch('rundown.research_workflow.repo_ops.clone_repo', return_value=('already_cloned', 'ready')),
+            patch('rundown.research_workflow.research.run_repository_research', return_value=('success', 'Fresh research')) as generate,
         ):
             async with app.run_test(size=(140, 35)) as pilot:
                 await app.workers.wait_for_complete()
@@ -206,10 +207,10 @@ def test_note_save_error_retains_draft_for_retry(tmp_path):
             await app.workers.wait_for_complete()
             await pilot.press('n')
             app.screen.query_one(TextArea).load_text('Keep this unsaved draft.')
-            with patch('rundown.tui.db.save_repo_card', side_effect=sqlite3.OperationalError('database is locked')):
+            with patch('rundown.tui.presentation.save_presentation_draft', side_effect=sqlite3.OperationalError('database is locked')):
                 await pilot.press('ctrl+s')
                 await pilot.pause()
-                assert isinstance(app.screen, HostNotesScreen)
+                assert isinstance(app.screen, CardEditScreen)
                 assert app.screen.query_one(TextArea).text == 'Keep this unsaved draft.'
             await pilot.press('ctrl+s')
             await pilot.pause()
@@ -256,9 +257,9 @@ def test_retry_after_failed_refresh_does_not_return_old_cache(tmp_path):
     async def run():
         app = RundownApp(config, fetch_starred=list)
         with (
-            patch('rundown.tui.research.load_cached_repository_research') as cached,
-            patch('rundown.tui.repo_ops.clone_repo', return_value=('already_cloned', 'ready')),
-            patch('rundown.tui.research.run_repository_research', side_effect=[('failed', 'Provider unavailable.'), ('success', 'New findings.')]) as generate,
+            patch('rundown.research_workflow.research.load_cached_repository_research') as cached,
+            patch('rundown.research_workflow.repo_ops.clone_repo', return_value=('already_cloned', 'ready')),
+            patch('rundown.research_workflow.research.run_repository_research', side_effect=[('failed', 'Provider unavailable.'), ('success', 'New findings.')]) as generate,
         ):
             async with app.run_test(size=(140, 35)) as pilot:
                 await app.workers.wait_for_complete()
@@ -302,4 +303,20 @@ def test_section_expansion_is_keyboard_accessible(tmp_path):
             await pilot.pause()
             assert full.collapsed
 
+    asyncio.run(run())
+
+
+def test_invalid_legacy_view_uses_default_without_crashing_reader(tmp_path):
+    config = AppConfig(root=tmp_path)
+    repo_id = seed(config)
+    with db.session(config.database_path) as conn:
+        conn.execute("INSERT INTO repo_cards (repo_id, view) VALUES (?, ?)", (repo_id, "legacy-bad-view"))
+
+    async def run():
+        app = RundownApp(config, fetch_starred=list)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.card_view == config.cards.default_view
+            assert app.query_one("#card-hook Markdown", Markdown).source == "A concise opening line for the host."
     asyncio.run(run())

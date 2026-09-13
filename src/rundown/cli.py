@@ -5,7 +5,9 @@ from dataclasses import asdict
 from datetime import timedelta
 from enum import Enum
 import json
+import sqlite3
 from pathlib import Path
+from threading import Event
 from time import monotonic
 from typing import Annotated
 
@@ -20,14 +22,15 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from . import categories, db, execution, export, github, history, repo_ops, research, scoring, wiki
+from . import categories, db, execution, export, github, history, repo_ops, research_workflow, scoring, wiki
+from . import startup
 from .demo import demo_environment
 from .doctor import run_doctor
 from .config import AppConfig, load_config
 from .tui import RundownApp
 
 
-app = typer.Typer(help="Local-first intelligence system for GitHub starred repositories.")
+app = typer.Typer(help="Browse → Read → Prepare → Export. Run rd with no command to open Rundown.", invoke_without_command=True)
 console = Console()
 
 
@@ -51,8 +54,24 @@ def _conn(config: AppConfig):
 
 
 @app.callback()
-def callback() -> None:
-    """Rundown CLI."""
+def callback(
+    ctx: typer.Context,
+    config: Annotated[Path | None, typer.Option("--config", "-c", help="Configuration for the default app launch.")] = None,
+) -> None:
+    """Open Rundown, or use an explicit command for automation."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if not startup.interactive_terminal():
+        typer.echo(ctx.get_help())
+        return
+    try:
+        problem = startup.launch(load_config(config))
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        typer.echo(f"Could not open Rundown: {exc}. Run `rd doctor` to check your setup.", err=True)
+        raise typer.Exit(1) from exc
+    if problem:
+        typer.echo(problem)
+        raise typer.Exit(1)
 
 
 @app.command("sync-stars")
@@ -133,9 +152,17 @@ def research_repo(
     config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
 ) -> None:
     cfg = _config(config)
-    with _conn(cfg) as conn:
-        db.init_db(conn)
-        status, summary = research.run_repository_research(cfg, conn, full_name)
+    cancel_event = Event()
+    try:
+        with _conn(cfg) as conn:
+            db.init_db(conn)
+            status, summary = research_workflow.research_repository(
+                cfg, conn, full_name, cancel_event=cancel_event
+            )
+    except KeyboardInterrupt:
+        cancel_event.set()
+        console.print("Research interrupted.")
+        raise typer.Exit(code=130) from None
     console.print(f"Research status: {status}")
     console.print(summary)
 
@@ -199,6 +226,7 @@ def research_missing(
     )
     succeeded = failed = 0
     interrupted = False
+    cancel_event = Event()
     started = monotonic()
     try:
         with display:
@@ -210,14 +238,18 @@ def research_missing(
                 try:
                     with _conn(cfg) as conn:
                         db.init_db(conn)
-                        clone_status, clone_message = repo_ops.clone_repo(cfg, conn, full_name)
-                        if clone_status == "failed":
-                            status, summary = "failed", clone_message
-                        else:
-                            stage.reset(stage_task, description=f"Researching · {full_name}")
-                            if not console.is_terminal:
-                                console.print(f"[{position}/{len(selected)}] Researching {full_name}…", markup=False)
-                            status, summary = research.run_repository_research(cfg, conn, full_name)
+                        def report_stage(state: str, _message: str) -> None:
+                            if state == "researching":
+                                stage.reset(stage_task, description=f"Researching · {full_name}")
+                                if not console.is_terminal:
+                                    console.print(f"[{position}/{len(selected)}] Researching {full_name}…", markup=False)
+                        status, summary = research_workflow.research_repository(
+                            cfg,
+                            conn,
+                            full_name,
+                            cancel_event=cancel_event,
+                            on_stage=report_stage,
+                        )
                 except Exception as exc:
                     status, summary = "failed", str(exc)
 
@@ -239,6 +271,7 @@ def research_missing(
                     results=f"{succeeded} saved · {failed} failed",
                 )
     except KeyboardInterrupt:
+        cancel_event.set()
         interrupted = True
 
     heading = "Research interrupted" if interrupted else "Research complete"
