@@ -12,6 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 # Keep golden colors independent of an operator's shell preferences.
 os.environ.pop("NO_COLOR", None)
@@ -81,7 +82,9 @@ async def _wait_for_palette(app: RundownApp, pilot) -> None:
 
 
 async def _capture_case(size: tuple[int, int], keys: tuple[str, ...]) -> str:
-    with demo_environment() as environment:
+    # The reader renders the seeded research log's date. Freeze the fixture clock
+    # instead of regenerating golden images every UTC midnight.
+    with patch("rundown.db.now_utc", return_value="2026-09-12T12:00:00+00:00"), demo_environment() as environment:
         app = RundownApp(
             environment.config,
             fetch_starred=environment.fetch_starred,
