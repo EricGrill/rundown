@@ -386,7 +386,7 @@ def generate_repository_research(
                     try:
                         decoded = adapter.decode(result.stdout)
                         parse_research(decoded.text, strict=True)
-                    except ValueError:
+                    except (ValueError, RecursionError):
                         reason = "invalid_output"
                     else:
                         check_cancelled(cancel_event)
@@ -396,6 +396,8 @@ def generate_repository_research(
                         if return_metadata:
                             return generated
                         return (generated.text, generated.harness) if return_provider else generated.text
+            except UnicodeError:
+                reason = "invalid_output"
             except subprocess.TimeoutExpired:
                 reason = "timeout"
             except OSError:

@@ -150,6 +150,36 @@ def test_custom_json_model_is_reported_not_inferred():
     assert harnesses.decode_json(json.dumps({"text": REPORT})).actual_model is None
 
 
+def test_custom_json_rejects_excessive_nesting():
+    with pytest.raises(ValueError, match="nesting"):
+        harnesses.decode_json("[" * 10000 + "0" + "]" * 10000)
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_real_invalid_encoding_records_safe_failure_and_falls_back(tmp_path, stream, exit_code):
+    code = f"import sys; sys.{stream}.buffer.write(b'private-token=\\xff'); sys.exit({exit_code})"
+    settings = ResearchSettings(fallback=("broken", "good"), custom={
+        "broken": CustomHarnessSettings(sys.executable, ("-c", code)),
+        "good": CustomHarnessSettings(sys.executable, ("-c", "import sys; print(sys.stdin.read())")),
+    })
+    result = research.generate_repository_research(AppConfig(root=tmp_path, research=settings), REPORT, tmp_path, return_metadata=True)
+    assert result.harness == "good"
+    assert result.attempts == ({"harness": "broken", "reason": "invalid_output"}, {"harness": "good", "reason": "success"})
+    assert "private-token" not in repr(result)
+
+
+def test_nested_custom_envelope_continues_fallback(tmp_path):
+    code = "print('[' * 10000 + '0' + ']' * 10000)"
+    settings = ResearchSettings(fallback=("nested", "good"), custom={
+        "nested": CustomHarnessSettings(sys.executable, ("-c", code), output="json"),
+        "good": CustomHarnessSettings(sys.executable, ("-c", "import sys; print(sys.stdin.read())")),
+    })
+    result = research.generate_repository_research(AppConfig(root=tmp_path, research=settings), REPORT, tmp_path, return_metadata=True)
+    assert result.harness == "good"
+    assert result.attempts[0] == {"harness": "nested", "reason": "invalid_output"}
+
+
 def test_provenance_persisted_for_success_and_failure(tmp_path):
     config = AppConfig(root=tmp_path)
     clone = tmp_path / "clone"
