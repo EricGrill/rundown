@@ -86,3 +86,16 @@ def test_catalog_listing_supports_legacy_optional_columns(tmp_path):
     assert result['results'][0]['projects'] == []
     assert catalog_repositories(conn, project='missing')['results'] == []
     conn.close()
+
+
+def test_nonfinite_saved_score_emits_valid_error_json(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg = AppConfig(root=tmp_path)
+    with db.session(cfg.database_path) as conn:
+        db.init_db(conn)
+        repo_id = db.upsert_repo(conn, db.RepoInput('a/b', 'a', 'b', 'https://github.com/a/b'))
+        conn.execute('UPDATE repos SET relevance_score=? WHERE id=?', (float('inf'), repo_id))
+    result = CliRunner().invoke(app, ['repos', '--json'])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout, parse_constant=lambda value: pytest.fail(value))
+    assert payload['error']['code'] == 'invalid_saved_data'

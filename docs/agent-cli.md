@@ -53,3 +53,7 @@ Use `rd discover "keywords language:Python" --json` to explicitly search public 
 ## Preserve project decisions
 
 Use `rd remember OWNER/REPO --project NAME --decision TEXT --reason TEXT` to append a dated decision, and `rd recall --project NAME --json` to retrieve it. Recent decisions also appear in saved search and inspection. See the [decision memory guide](agent-memory.md).
+
+## Run from agents, editors and schedulers
+
+Use `rd digest --json` for a bounded saved shortlist, `rd refresh --dry-run --json` to preview missing/stale research, and `rd mcp` for read-only stdio tools. See the [automation guide](agent-automation.md) for the agent instruction snippet, editor task, scheduler command and MCP configuration. Invalid saved nonfinite numeric values produce an operational error instead of invalid JSON.

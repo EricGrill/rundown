@@ -57,13 +57,22 @@ def envelope(data: Any = None, error: AgentError | None = None) -> dict[str, Any
 
 
 def emit(data: Any, json_output: bool, error: AgentError | None = None) -> None:
-    if json_output:
-        typer.echo(json.dumps(envelope(data, error), ensure_ascii=False))
-    elif error:
+    if not json_output and error:
         typer.echo(f"{error.code}: {error}", err=True)
-    else:
-        # Plain JSON is also a readable, lossless default for inspection packets.
-        typer.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+    try:
+        output = json.dumps(
+            envelope(data, error) if json_output else data,
+            ensure_ascii=False, allow_nan=False, indent=None if json_output else 2,
+        )
+    except (ValueError, TypeError, RecursionError) as exc:
+        failure = AgentError("invalid_saved_data", "Result contains data that cannot be represented as JSON.")
+        if json_output:
+            typer.echo(json.dumps(envelope(None, failure), allow_nan=False))
+        else:
+            typer.echo(f"{failure.code}: {failure}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(output)
 
 
 def run_command(operation: Callable[[], Any], json_output: bool) -> None:
