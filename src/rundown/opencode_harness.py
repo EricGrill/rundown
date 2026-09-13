@@ -132,7 +132,10 @@ def decode_opencode(stdout: str) -> HarnessOutput:
     for line in stdout.splitlines():
         if not line.strip():
             continue
-        event = json.loads(line)
+        try:
+            event = json.loads(line)
+        except RecursionError as exc:
+            raise ValueError("OpenCode event exceeds supported nesting") from exc
         if not isinstance(event, dict):
             raise ValueError("Invalid OpenCode event")
         kind = event.get("type")

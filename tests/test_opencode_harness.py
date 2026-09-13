@@ -93,6 +93,22 @@ def test_decoder_rejects_conflicting_parts():
         opencode_harness.decode_opencode(json.dumps(event("first")) + "\n" + json.dumps(event("second")))
 
 
+def test_nested_jsonl_event_continues_fallback(tmp_path, isolated_opencode):
+    nested = "[" * 10000 + "0" + "]" * 10000
+    with pytest.raises(ValueError, match="nesting"):
+        opencode_harness.decode_opencode(nested)
+    config = AppConfig(root=tmp_path, research=ResearchSettings(fallback=("opencode", "codex"), model="openai/test"))
+    with patch.object(research.shutil, "which", return_value="/bin/tool"), patch.object(
+        research, "run_command", side_effect=[
+            subprocess.CompletedProcess([], 0, nested, ""),
+            subprocess.CompletedProcess([], 0, REPORT, ""),
+        ]
+    ):
+        result = research.generate_repository_research(config, REPORT, tmp_path, return_metadata=True)
+    assert result.harness == "codex"
+    assert result.attempts[0] == {"harness": "opencode", "reason": "invalid_output"}
+
+
 def test_preflight_is_visible_in_doctor_and_fallback_history(tmp_path, isolated_opencode):
     config = AppConfig(root=tmp_path, research=ResearchSettings(fallback=("opencode", "codex")))
     with patch.object(research.shutil, "which", return_value="/bin/tool"), patch.object(
