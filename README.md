@@ -120,6 +120,17 @@ On an empty first run, choose **Try demo** for the isolated sample catalog or **
 
 The main screen follows four steps: **Browse** a repository, **Read** its saved research, **Prepare** the human parts of its card, then **Export** it. The contextual action row shows those steps for the selected repository. Maintenance and less common actions remain in `Ctrl+P`.
 
+## Use from an AI agent or script
+
+Search saved metadata, research and notes without opening the TUI or calling a provider:
+
+```bash
+rd search "background jobs python" --json --limit 5
+rd repos --project "My app" --json
+```
+
+Results explain their matches; new JSON commands use a versioned envelope and explicit error exit codes. See the [agent CLI guide](docs/agent-cli.md) for output contracts and integration examples.
+
 ## TUI keys
 
 | Key | Action |
