@@ -28,7 +28,7 @@ def test_codex_provider_loads_and_returns_final_report(tmp_path):
     config = load_config(config_file)
     with (
         patch.object(research.shutil, "which", return_value="/bin/codex"),
-        patch.object(research.subprocess, "run", return_value=subprocess.CompletedProcess(
+        patch.object(research, "run_command", return_value=subprocess.CompletedProcess(
             [], 0, REPORT, "Codex diagnostic output",
         )) as run,
     ):
@@ -53,7 +53,7 @@ def test_auto_falls_back_to_codex_after_other_agents_fail(tmp_path):
     config = AppConfig(root=tmp_path)
     with (
         patch.object(research.shutil, "which", side_effect=lambda name: f"/bin/{name}"),
-        patch.object(research.subprocess, "run", side_effect=[
+        patch.object(research, "run_command", side_effect=[
             subprocess.CompletedProcess([], 1, "", "Claude unavailable"),
             subprocess.CompletedProcess([], 0, "Incomplete Gemini report", ""),
             subprocess.CompletedProcess([], 0, REPORT, ""),
@@ -68,8 +68,8 @@ def test_auto_reports_actual_successful_provider(tmp_path):
     with (
         patch.object(research.shutil, "which", return_value="/bin/provider"),
         patch.object(
-            research.subprocess,
-            "run",
+            research,
+            "run_command",
             side_effect=[
                 subprocess.CompletedProcess([], 1, "", "unavailable"),
                 subprocess.CompletedProcess([], 0, REPORT, ""),
@@ -107,13 +107,13 @@ def test_cancellation_stops_provider_fallback(tmp_path):
             cancel_event=cancelled,
         )
 
-    run.assert_called_once()
+    run.assert_not_called()
 
 
 def test_auto_uses_codex_when_other_clis_are_not_installed(tmp_path):
     with (
         patch.object(research.shutil, "which", side_effect=lambda name: "/bin/codex" if name == "codex" else None),
-        patch.object(research.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, REPORT, "")) as run,
+        patch.object(research, "run_command", return_value=subprocess.CompletedProcess([], 0, REPORT, "")) as run,
     ):
         assert research.generate_repository_research(AppConfig(root=tmp_path), "prompt", tmp_path) == REPORT
     run.assert_called_once()
@@ -125,8 +125,8 @@ def test_provider_accepts_versioned_json_and_returns_original_text(tmp_path):
     with (
         patch.object(research.shutil, "which", return_value="/bin/codex"),
         patch.object(
-            research.subprocess,
-            "run",
+            research,
+            "run_command",
             return_value=subprocess.CompletedProcess([], 0, JSON_REPORT, ""),
         ),
     ):
@@ -136,7 +136,7 @@ def test_provider_accepts_versioned_json_and_returns_original_text(tmp_path):
 
 
 @pytest.mark.parametrize("failure, message", [
-    (subprocess.CompletedProcess([], 1, "", "login required"), "codex failed: login required"),
+    (subprocess.CompletedProcess([], 1, "", "login required"), "codex failed: nonzero exit"),
     (subprocess.CompletedProcess([], 0, "incomplete", ""), "codex returned incomplete research"),
     (subprocess.TimeoutExpired("codex", 180), "codex exceeded the 180s timeout"),
 ])
@@ -144,7 +144,7 @@ def test_codex_failures_are_reported(tmp_path, failure, message):
     config = AppConfig(root=tmp_path, research=ResearchSettings(provider="codex"))
     with (
         patch.object(research.shutil, "which", return_value="/bin/codex"),
-        patch.object(research.subprocess, "run", side_effect=[failure]),
+        patch.object(research, "run_command", side_effect=[failure]),
         pytest.raises(research.ResearchAgentError, match=message),
     ):
         research.generate_repository_research(config, "prompt", tmp_path)

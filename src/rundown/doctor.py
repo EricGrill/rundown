@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from .config import AppConfig, load_config
+from .harnesses import selected_harnesses
 
 CheckStatus = Literal["ok", "warning", "error"]
 
@@ -111,35 +112,19 @@ def _github_check() -> DoctorCheck:
 
 
 def _provider_check(config: AppConfig) -> DoctorCheck:
-    configured = config.research.provider
-    provider_names = ("claude", "gemini", "codex")
-    available = tuple(name for name in provider_names if shutil.which(name))
-    if configured not in {"auto", *provider_names}:
-        return DoctorCheck(
-            "Research provider",
-            "error",
-            "The configured research provider is not supported.",
-            "Set research.provider to auto, claude, gemini, or codex.",
-        )
-    if configured != "auto" and configured not in available:
-        return DoctorCheck(
-            "Research provider",
-            "error",
-            f"Configured provider {configured} is not installed or is not on PATH.",
-            f"Install {configured}, or set research.provider to auto.",
-        )
+    selected = selected_harnesses(config.research)
+    available = tuple(adapter.identifier for adapter in selected if shutil.which(adapter.executable))
+    order = ", ".join(adapter.identifier for adapter in selected)
     if not available:
         return DoctorCheck(
-            "Research provider",
-            "warning",
-            "No supported AI CLI is installed; saved and demo research still work.",
-            "Install and authenticate Claude, Gemini, or Codex CLI to generate research.",
+            "Research provider", "warning" if config.research.provider == "auto" else "error",
+            f"No configured research harness is installed. Order: {order}.",
+            "Install and authenticate a configured harness; saved research still works.",
         )
-    selected = ", ".join(available) if configured == "auto" else configured
     return DoctorCheck(
-        "Research provider",
-        "ok",
-        f"Available provider command(s): {selected}. Authentication was not probed.",
+        "Research provider", "ok",
+        f"Configured order: {order}. Available: {', '.join(available)}. "
+        f"Requested model: {config.research.model or 'CLI default'}. Authentication was not probed.",
         "Run the selected provider's own auth-status command if generation fails.",
     )
 

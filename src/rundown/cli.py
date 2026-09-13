@@ -545,7 +545,7 @@ def doctor(
 def research_history(
     full_name: str,
     config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
-    json_output: Annotated[bool, typer.Option("--json", help="Include complete stored provenance and the last two successful reports.")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Include stored provenance, two recent failures and two successful reports.")] = False,
 ) -> None:
     """Show research sources and changes since the previous successful report."""
     cfg = _config(config)
@@ -554,7 +554,7 @@ def research_history(
         row = db.get_repo(conn, full_name)
         if row is None:
             raise typer.BadParameter(f"Unknown repository: {full_name}")
-        reports = [dict(report) for report in history.research_history(conn, row["id"])]
+        reports = [dict(report) for report in history.research_history(conn, row["id"], include_failed=True)]
     if json_output:
         typer.echo(json.dumps([dict(report) for report in reports], indent=2))
     else:

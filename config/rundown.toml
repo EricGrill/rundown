@@ -21,9 +21,12 @@ require_confirmation_for_unknown_commands = true
 timeout_seconds = 120
 
 [research]
-# auto tries Claude, then Gemini, then Codex. Or choose claude, gemini, or codex.
-# Each CLI uses its own configured/default model and authentication.
+# auto uses this explicit order. An explicit provider never falls back.
+# See docs/research-harnesses.md for custom commands and provenance.
 provider = "auto"
+fallback = ["claude", "gemini", "codex"]
+# Omit model to preserve the CLI default and its own authentication.
+# model = "your-model-id"
 # Customize locally; do not commit private work or personal context.
 profile = "I am interested in useful software, developer tools, and automation."
 timeout_seconds = 180

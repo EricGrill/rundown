@@ -39,7 +39,7 @@ def test_provider_runs_outside_untrusted_clone(tmp_path):
 
     with (
         patch.object(research.shutil, "which", return_value="/bin/codex"),
-        patch.object(research.subprocess, "run", side_effect=fake_run),
+        patch.object(research, "run_command", side_effect=fake_run),
     ):
         assert research.generate_repository_research(config, "provided context", clone) == report
 

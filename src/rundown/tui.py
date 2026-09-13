@@ -765,7 +765,7 @@ class RundownApp(App):
         if row is None:
             return
         with session(self.config.database_path) as conn:
-            reports = [dict(report) for report in history.research_history(conn, row["id"])]
+            reports = [dict(report) for report in history.research_history(conn, row["id"], include_failed=True)]
         self.push_screen(HistoryScreen(row["full_name"], history.format_research_history(reports)))
 
     def action_show_jobs(self) -> None:

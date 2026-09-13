@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -9,10 +10,12 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from . import db
 from .cards import SCHEMA_VERSION, SECTION_TITLES, parse_research
 from .config import AppConfig
+from .harnesses import selected_harnesses
 from .processes import check_cancelled, run_command
 from .wiki import append_section, ensure_wiki_page
 
@@ -39,7 +42,9 @@ _REVISION_UNSET = object()
 
 
 class ResearchAgentError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, attempts: tuple[dict[str, str], ...] = ()):
+        super().__init__(message)
+        self.attempts = attempts
 
 
 @dataclass(frozen=True)
@@ -292,6 +297,7 @@ def repository_fingerprint(
             str(SCHEMA_VERSION),
             str(captured_revision or ""),
             config.research.profile,
+            repr((config.research.provider, config.research.model, config.research.fallback, config.research.custom)),
             config.cards.audience,
             config.cards.tone,
             str(config.cards.duration_seconds),
@@ -332,56 +338,13 @@ def load_cached_repository_research(
     return None
 
 
-def _agent_commands(provider: str, prompt: str) -> list[list[str]]:
-    commands = {
-        "claude": [
-            "claude",
-            "--print",
-            "--output-format",
-            "text",
-            "--permission-mode",
-            "dontAsk",
-            "--tools",
-            "",
-            "--no-session-persistence",
-            prompt,
-        ],
-        "gemini": [
-            "gemini",
-            "--prompt",
-            prompt,
-            "--output-format",
-            "text",
-            "--approval-mode",
-            "plan",
-            "--allowed-tools",
-            "",
-        ],
-        "codex": [
-            "codex",
-            "exec",
-            "--sandbox",
-            "read-only",
-            "--config",
-            'approval_policy="never"',
-            "--disable",
-            "shell_tool",
-            "--config",
-            'web_search="disabled"',
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--color",
-            "never",
-            prompt,
-        ],
-    }
-    if provider == "auto":
-        return [commands["claude"], commands["gemini"], commands["codex"]]
-    if provider not in commands:
-        raise ResearchAgentError(
-            f"Unsupported research provider {provider!r}; use auto, claude, gemini, or codex."
-        )
-    return [commands[provider]]
+@dataclass(frozen=True)
+class ResearchGeneration:
+    text: str
+    harness: str
+    requested_model: str | None
+    actual_model: str | None
+    attempts: tuple[dict[str, str], ...]
 
 
 def generate_repository_research(
@@ -391,51 +354,65 @@ def generate_repository_research(
     *,
     cancel_event: threading.Event | None = None,
     return_provider: bool = False,
-) -> str | tuple[str, str]:
+    return_metadata: bool = False,
+) -> str | tuple[str, str] | ResearchGeneration:
+    check_cancelled(cancel_event)
+    attempts: list[dict[str, str]] = []
     failures: list[str] = []
-    for command in _agent_commands(config.research.provider, prompt):
-        if shutil.which(command[0]) is None:
-            failures.append(f"{command[0]} is not installed")
-            continue
-        try:
-            # Context is supplied in the prompt; do not load a clone's CLI config/hooks.
-            with TemporaryDirectory(prefix="rundown-research-") as workdir:
-                run_kwargs = {
-                    "cwd": workdir,
-                    "stdin": subprocess.DEVNULL,
-                    "text": True,
-                    "capture_output": True,
-                    "timeout": config.research.timeout_seconds,
-                }
-                if cancel_event is None:
-                    result = subprocess.run(command, **run_kwargs)
+    for adapter in selected_harnesses(config.research):
+        check_cancelled(cancel_event)
+        reason = ""
+        if shutil.which(adapter.executable) is None:
+            reason = "missing_executable"
+        else:
+            try:
+                with TemporaryDirectory(prefix="rundown-research-") as workdir:
+                    invocation = adapter.build(prompt, config.research.model, Path(workdir))
+                    run_kwargs: dict[str, Any] = {
+                        "cwd": workdir, "text": True, "capture_output": True,
+                        "timeout": config.research.timeout_seconds,
+                    }
+                    if invocation.input is None:
+                        run_kwargs["stdin"] = subprocess.DEVNULL
+                    else:
+                        run_kwargs["input"] = invocation.input
+                    if invocation.env:
+                        run_kwargs["env"] = {**os.environ, **invocation.env}
+                    result = run_command(invocation.argv, cancel_event=cancel_event, **run_kwargs)
+                check_cancelled(cancel_event)
+                if result.returncode != 0:
+                    reason = "nonzero_exit"
                 else:
-                    result = run_command(
-                        command,
-                        cancel_event=cancel_event,
-                        **run_kwargs,
-                    )
-        except subprocess.TimeoutExpired:
-            failures.append(
-                f"{command[0]} exceeded the {config.research.timeout_seconds}s timeout"
-            )
-            continue
-        output = result.stdout.strip()
-        if result.returncode != 0:
-            failures.append(
-                f"{command[0]} failed: {(result.stderr or result.stdout).strip()}"
-            )
-            continue
-        try:
-            parse_research(output, strict=True)
-        except ValueError as exc:
-            failures.append(
-                f"{command[0]} returned incomplete research: {exc}"
-            )
-            continue
-        return (output, command[0]) if return_provider else output
+                    try:
+                        decoded = adapter.decode(result.stdout)
+                        parse_research(decoded.text, strict=True)
+                    except ValueError:
+                        reason = "invalid_output"
+                    else:
+                        check_cancelled(cancel_event)
+                        attempts.append({"harness": adapter.identifier, "reason": "success"})
+                        generated = ResearchGeneration(decoded.text, adapter.identifier,
+                            config.research.model, decoded.actual_model, tuple(attempts))
+                        if return_metadata:
+                            return generated
+                        return (generated.text, generated.harness) if return_provider else generated.text
+            except subprocess.TimeoutExpired:
+                reason = "timeout"
+            except OSError:
+                reason = "launch_error"
+        check_cancelled(cancel_event)
+        attempts.append({"harness": adapter.identifier, "reason": reason})
+        descriptions = {
+            "missing_executable": "is not installed",
+            "nonzero_exit": "failed: nonzero exit",
+            "invalid_output": "returned incomplete research",
+            "timeout": f"exceeded the {config.research.timeout_seconds}s timeout",
+            "launch_error": "could not be launched",
+        }
+        failures.append(f"{adapter.identifier} {descriptions[reason]}")
     raise ResearchAgentError(
-        "No research agent produced a valid result. " + " | ".join(failures)
+        "No research agent produced a valid result. " + " | ".join(failures),
+        attempts=tuple(attempts),
     )
 
 
@@ -488,6 +465,7 @@ def run_repository_research(
         revision=context_bundle.git_commit,
     )
     prompt = build_research_prompt(config, row, context)
+    generation: ResearchGeneration | None = None
     try:
         generated = generate_repository_research(
             config,
@@ -495,8 +473,12 @@ def run_repository_research(
             local_path,
             cancel_event=cancel_event,
             return_provider=True,
+            return_metadata=True,
         )
-        if isinstance(generated, tuple):
+        if isinstance(generated, ResearchGeneration):
+            generation = generated
+            provider_output, actual_provider = generated.text, generated.harness
+        elif isinstance(generated, tuple):
             provider_output, actual_provider = generated
         else:
             provider_output = generated
@@ -523,6 +505,12 @@ def run_repository_research(
             "failed",
             str(wiki_path),
             summary,
+            provenance_json=json.dumps({
+                "requested_harness": config.research.provider,
+                "requested_model": config.research.model,
+                "actual_model": None,
+                "attempts": list(exc.attempts) if isinstance(exc, ResearchAgentError) else [],
+            }),
         )
         append_section(wiki_path, "Research Pass: Repository Understanding", summary)
         return "failed", summary
@@ -531,6 +519,11 @@ def run_repository_research(
     provenance_json = json.dumps(
         {
             "provider": actual_provider,
+            "harness": actual_provider,
+            "requested_harness": config.research.provider,
+            "requested_model": config.research.model,
+            "actual_model": generation.actual_model if generation else None,
+            "attempts": list(generation.attempts) if generation else [],
             "generated_at": generated_at,
             "git_commit": context_bundle.git_commit,
             "working_tree_dirty": context_bundle.working_tree_dirty,
