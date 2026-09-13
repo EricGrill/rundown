@@ -49,3 +49,7 @@ Compact inspection caps text fields and has a 50,000-character text budget. `--f
 ## Find tools you have not saved
 
 Use `rd discover "keywords language:Python" --json` to explicitly search public GitHub metadata, then `rd add OWNER/REPO --json` to import a selected candidate without starring it remotely. See the [discovery guide](agent-discovery.md) for request limits, ranking, visibility and import semantics.
+
+## Preserve project decisions
+
+Use `rd remember OWNER/REPO --project NAME --decision TEXT --reason TEXT` to append a dated decision, and `rd recall --project NAME --json` to retrieve it. Recent decisions also appear in saved search and inspection. See the [decision memory guide](agent-memory.md).
