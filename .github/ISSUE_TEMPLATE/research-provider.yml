@@ -1,0 +1,66 @@
+name: Research provider issue
+description: Report a problem with Claude, Gemini, or Codex research
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for issues related to AI research providers—authentication, timeouts, malformed responses, or provider selection.
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: AI provider
+      description: Which CLI are you using for research?
+      options:
+        - Claude (claude)
+        - Gemini (gemini)
+        - Codex (codex)
+        - Auto (provider = "auto")
+    validations:
+      required: true
+
+  - type: dropdown
+    id: auth-status
+    attributes:
+      label: Authentication status
+      description: Have you authenticated with this provider's CLI?
+      options:
+        - Yes, logged in and working for other tasks
+        - Yes, but not sure if session is valid
+        - "No / Don't know"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What went wrong during research?
+      placeholder: Describe the failure clearly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact command you ran
+      placeholder: "rd research owner/repo"
+      render: bash
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output
+      description: Include the error message or traceback.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Paste the output of `rd doctor` here.
+      render: text

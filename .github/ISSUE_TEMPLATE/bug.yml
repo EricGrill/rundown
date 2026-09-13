@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a problem with Rundown
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill out the sections below so we can reproduce and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect to happen?
+      placeholder: Describe the bug clearly and concisely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: How can we trigger this bug?
+      placeholder: |
+        1. Run `rd ...`
+        2. Press ...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Paste the output of `rd doctor` here.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, terminal, Python version, how Rundown was installed
+      placeholder: |
+        - OS: macOS 14.5 / Ubuntu 24.04 / Windows 11
+        - Terminal: iTerm2 / gnome-terminal / Windows Terminal
+        - Python: 3.11.9
+        - Install method: uv tool / pipx / editable checkout
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error messages
+      description: Include any error output, tracebacks, or log snippets.
+      render: text
