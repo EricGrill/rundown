@@ -45,3 +45,7 @@ Inspection separates repository metadata, generated research, supplied source co
 Compact inspection caps text fields and has a 50,000-character text budget. `--full` exposes more saved text, with a 1,000,000-character absolute text budget. Project mappings and JSON structure also have limits. The `truncation` object identifies omitted/shortened content; `--full` is not an unlimited dump. Use the original local Markdown files for reports exceeding these bounds.
 
 `research` is an explicit live operation: it requires a catalog entry, reuses an applicable saved cache, and otherwise clones as needed and invokes your configured AI provider. `--force` bypasses that cache. It uses the same research workflow and effective template as the TUI. Machine output reports success/cached/failure/cancellation; its summary is capped at 20,000 characters, with `summary_truncated` and the complete saved report available through inspection/storage. Provider failure exits 1, cancellation exits 130, and previous successful research remains available. Unknown targets fail before creating directories.
+
+## Find tools you have not saved
+
+Use `rd discover "keywords language:Python" --json` to explicitly search public GitHub metadata, then `rd add OWNER/REPO --json` to import a selected candidate without starring it remotely. See the [discovery guide](agent-discovery.md) for request limits, ranking, visibility and import semantics.
