@@ -16,8 +16,8 @@ def main() -> None:
     parser.add_argument("dist", type=Path)
     args = parser.parse_args()
     version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    wheel = args.dist / f"rundown-{version}-py3-none-any.whl"
-    source = args.dist / f"rundown-{version}.tar.gz"
+    wheel = args.dist / f"gh_rundown-{version}-py3-none-any.whl"
+    source = args.dist / f"gh_rundown-{version}.tar.gz"
     if not wheel.is_file() or not source.is_file():
         raise SystemExit(f"Expected {wheel.name} and {source.name}")
 

@@ -3,7 +3,7 @@ requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rundown"
+name = "gh-rundown"
 version = "0.2.0"
 description = "Turn GitHub stars into research cards and host briefs with a local-first TUI and configurable AI harnesses."
 readme = "README.md"
