@@ -3,26 +3,34 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from threading import Event
 from typing import Iterable
 
 from .db import RepoInput
+from .processes import run_command
 
 
 class GithubCliError(RuntimeError):
     pass
 
 
-def ensure_gh_authenticated() -> None:
+def ensure_gh_authenticated(*, cancel_event: Event | None = None) -> None:
     if shutil.which("gh") is None:
         raise GithubCliError("GitHub CLI `gh` is not installed or not on PATH.")
-    result = subprocess.run(["gh", "auth", "status"], text=True, capture_output=True)
+    result = (subprocess.run(["gh", "auth", "status"], text=True, capture_output=True)
+              if cancel_event is None else
+              run_command(["gh", "auth", "status"], text=True, capture_output=True,
+                          timeout=30, cancel_event=cancel_event))
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or "gh auth status failed"
         raise GithubCliError(f"GitHub CLI is not authenticated: {message}")
 
 
-def fetch_starred(include_private: bool = False) -> list[RepoInput]:
-    ensure_gh_authenticated()
+def fetch_starred(include_private: bool = False, *, cancel_event: Event | None = None) -> list[RepoInput]:
+    if cancel_event is None:
+        ensure_gh_authenticated()
+    else:
+        ensure_gh_authenticated(cancel_event=cancel_event)
     command = [
         "gh",
         "api",
@@ -39,7 +47,8 @@ def fetch_starred(include_private: bool = False) -> list[RepoInput]:
             "archived: .repo.archived, private: .repo.private}"
         ),
     ]
-    result = subprocess.run(command, text=True, capture_output=True)
+    result = (subprocess.run(command, text=True, capture_output=True) if cancel_event is None else
+              run_command(command, text=True, capture_output=True, timeout=120, cancel_event=cancel_event))
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip()
         raise GithubCliError(f"Unable to fetch starred repositories: {message}")

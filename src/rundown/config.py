@@ -64,6 +64,22 @@ class TuiSettings:
 
 
 @dataclass(frozen=True)
+class SchedulerSettings:
+    interval_minutes: int = 60
+    batch_size: int = 10
+    retry_hours: int = 24
+    sync_stars: bool = True
+
+    def __post_init__(self) -> None:
+        for name, maximum in (("interval_minutes", 10080), ("batch_size", 50), ("retry_hours", 720)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+                raise ValueError(f"scheduler.{name} must be an integer between 1 and {maximum}")
+        if not isinstance(self.sync_stars, bool):
+            raise ValueError("scheduler.sync_stars must be a boolean")
+
+
+@dataclass(frozen=True)
 class CardTemplateSettings:
     sections: tuple[str, ...]
     word_limit: int
@@ -135,6 +151,7 @@ class AppConfig:
     research: ResearchSettings = field(default_factory=ResearchSettings)
     tui: TuiSettings = field(default_factory=TuiSettings)
     cards: CardSettings = field(default_factory=CardSettings)
+    scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
 
     def resolve(self, path: Path) -> Path:
         return path if path.is_absolute() else (self.root / path).resolve()
@@ -269,6 +286,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     if set(research) - {"provider", "model", "fallback", "custom", "profile", "timeout_seconds", "max_context_chars"}:
         raise ValueError("Unknown research settings")
     tui = _table(data, "tui")
+    scheduler = data.get("scheduler", {})
+    if not isinstance(scheduler, dict):
+        raise ValueError("scheduler must be a table")
+    if set(scheduler) - {"interval_minutes", "batch_size", "retry_hours", "sync_stars"}:
+        raise ValueError("Unknown scheduler settings")
 
     return AppConfig(
         root=root,
@@ -302,4 +324,5 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             default_sort=str(tui.get("default_sort", "starred_at")),
         ),
         cards=_card_settings(data),
+        scheduler=SchedulerSettings(**scheduler),
     )

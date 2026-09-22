@@ -565,8 +565,12 @@ def run_repository_research(
     db.update_repo(
         conn,
         full_name,
-        status="researched",
         last_research_sync=db.now_utc(),
         wiki_path=str(wiki_path),
+    )
+    # A background provider call must not undo a user's archive decision.
+    conn.execute(
+        "UPDATE repos SET status = 'researched' WHERE full_name = ? AND COALESCE(status, '') != 'archived'",
+        (full_name,),
     )
     return "success", summary
