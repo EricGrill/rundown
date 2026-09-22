@@ -22,17 +22,7 @@ rd                                   # open your own starred repositories
 
 Something missing? Run `rd doctor --fix` to check your setup and run the login steps it finds.
 
-<!-- 
-🎬 HERO GIF PLACEHOLDER
-
-TODO: Add 20-30s animated demo here (see issue #31)
-Recording instructions: https://github.com/EricGrill/rundown/issues/31
-
-Suggested path: docs/images/tui-hero.gif
-Suggested flow: rd demo → filter → open host brief → switch views
-
-Until recorded, the static screenshots below demonstrate the TUI.
--->
+![Rundown demo: browse the catalog, filter to uv, read its host brief and research card, prepare the card, and export it](docs/images/tui-hero.gif)
 
 ## Features
 

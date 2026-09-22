@@ -64,6 +64,8 @@ uv pip install -e ".[dev]"
 
 The demo fixture is bundled in the wheel. `rd demo` uses a temporary database and never reads the normal catalog, calls GitHub, clones repositories, or invokes an AI provider.
 
+Re-record the README hero GIF with `python scripts/record_hero.py`. It drives the offline demo and needs `rsvg-convert` and `ffmpeg`.
+
 When an intentional TUI change has been visually reviewed, refresh the committed SVG baselines and README screenshots with `python scripts/capture_tui.py --update-baselines --png`. The default command compares the committed wide, compact, and modal views against those baselines and never changes them.
 
 ## Publish a release
