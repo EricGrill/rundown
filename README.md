@@ -256,7 +256,7 @@ Research your starred repositories automatically, even while the TUI is closed:
 
 ```bash
 rd schedule run --dry-run       # Preview the local queue without making calls
-rd schedule enable             # macOS: start now, then run hourly and at login
+rd schedule enable             # macOS or Linux: start now, then run hourly and at login
 rd schedule status             # See pending work, retries, and the last run
 rd schedule disable            # Stop automatic runs; keep saved research
 ```
@@ -265,7 +265,7 @@ Each run syncs GitHub stars and researches up to 10 active starred repositories
 without successful research. Completed reports are skipped, and failed repositories
 wait 24 hours before another attempt so the queue keeps moving. Configure the
 interval, batch size, and retry delay in `[scheduler]`. Research uses your configured
-AI provider and its account. On Linux, use `rd schedule run` from cron or a service
+AI provider and its account. macOS uses a LaunchAgent and Linux uses a systemd user
 timer. See [automatic research setup](docs/agent-automation.md#automatic-starred-repository-research).
 
 The command shows overall progress, the current clone or research stage, elapsed time, and saved/failed counts. `Ctrl+C` stops the batch while keeping completed results.

@@ -45,7 +45,7 @@ def register(app: typer.Typer) -> None:
         json_output: Annotated[bool, typer.Option("--json")] = False,
         config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
     ) -> None:
-        """Install the current catalog's macOS user scheduler and run at login."""
+        """Install this catalog's user scheduler (macOS LaunchAgent or Linux systemd timer)."""
         run_command(lambda: enable_service(load_agent_config(config), config), json_output)
 
     @schedule.command("disable")

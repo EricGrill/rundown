@@ -1,4 +1,4 @@
-"""Per-catalog user LaunchAgent management; never invokes a shell."""
+"""Per-catalog user scheduler: LaunchAgent on macOS, systemd timer on Linux. Never invokes a shell."""
 from __future__ import annotations
 
 import hashlib
@@ -8,6 +8,7 @@ import plistlib
 import subprocess
 import sys
 
+from . import scheduler_systemd as systemd
 from .agent_io import AgentError
 from .config import AppConfig
 
@@ -17,9 +18,22 @@ def service_label(config: AppConfig) -> str:
     return f"com.rundown.research.{key}"
 
 
+def _linux() -> bool:
+    return sys.platform.startswith("linux")
+
+
 def _platform() -> None:
-    if sys.platform != "darwin":
-        raise AgentError("unsupported_platform", "Automatic installation supports macOS. Use `rd schedule run --config PATH --json` with your external scheduler.", 2)
+    if sys.platform != "darwin" and not _linux():
+        raise AgentError("unsupported_platform", "Automatic installation supports macOS and Linux. Use `rd schedule run --config PATH --json` with your external scheduler.", 2)
+
+
+def _path_value() -> str:
+    path_entries = [entry for entry in os.environ.get("PATH", "").split(os.pathsep)
+                    if entry and Path(entry).is_absolute()]
+    for entry in ("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"):
+        if entry not in path_entries:
+            path_entries.append(entry)
+    return os.pathsep.join(path_entries)
 
 
 def _plist_path(config: AppConfig) -> Path:
@@ -67,17 +81,12 @@ def _owned(path: Path, label: str) -> dict:
 
 def launch_agent(config: AppConfig, config_path: Path) -> dict:
     """Keep the virtualenv interpreter path: resolving its symlink loses the venv."""
-    path_entries = [entry for entry in os.environ.get("PATH", "").split(os.pathsep)
-                    if entry and Path(entry).is_absolute()]
-    for entry in ("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"):
-        if entry not in path_entries:
-            path_entries.append(entry)
     label = service_label(config)
     return {
         "Label": label,
         "ProgramArguments": [os.path.abspath(sys.executable), "-m", "rundown.cli", "schedule", "run", "--config", str(config_path.resolve()), "--json"],
         "WorkingDirectory": str(config.root.resolve()),
-        "EnvironmentVariables": {"PATH": os.pathsep.join(path_entries)},
+        "EnvironmentVariables": {"PATH": _path_value()},
         "StartInterval": config.scheduler.interval_minutes * 60,
         "RunAtLoad": True,
         "ExitTimeOut": 30,
@@ -87,6 +96,8 @@ def launch_agent(config: AppConfig, config_path: Path) -> dict:
 
 
 def service_status(config: AppConfig) -> dict:
+    if _linux():
+        return systemd.status(service_label(config))
     if sys.platform != "darwin":
         return {"supported": False, "enabled": False, "message": "Use `rd schedule run --config PATH --json` with your external scheduler."}
     path = _plist_path(config)
@@ -101,6 +112,8 @@ def enable_service(config: AppConfig, config_path: Path | None = None) -> dict:
     source = (config_path or Path("config/rundown.toml")).resolve()
     if not source.is_file():
         raise AgentError("invalid_config", f"Scheduler needs a saved configuration file: {source}. Pass --config PATH.", 2)
+    if _linux():
+        return systemd.enable(config, source, service_label(config), _path_value())
     expected = launch_agent(config, source)
     label = service_label(config)
     path = _plist_path(config)
@@ -132,6 +145,8 @@ def enable_service(config: AppConfig, config_path: Path | None = None) -> dict:
 
 def disable_service(config: AppConfig) -> dict:
     _platform()
+    if _linux():
+        return systemd.disable(service_label(config))
     path = _plist_path(config)
     label = service_label(config)
     exists = path.exists() or path.is_symlink()

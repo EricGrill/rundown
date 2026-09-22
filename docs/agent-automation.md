@@ -42,7 +42,7 @@ Digest is always local. It ranks by saved project fit, saved relevance score and
 
 ## Automatic starred-repository research
 
-Enable a managed schedule on macOS:
+Enable a managed schedule on macOS or Linux:
 
 ```bash
 rd schedule run --dry-run --json --config /absolute/path/to/config/rundown.toml
@@ -97,7 +97,15 @@ and your provider first. If those paths change, disable and enable the schedule 
 The scheduler does not copy API keys from your shell environment into its plist;
 providers should use their saved local authentication.
 
-On Linux, or with an existing external scheduler, invoke the same single-pass command:
+On Linux, `enable` writes a systemd user service and timer to
+`~/.config/systemd/user/rundown-research-<id>.{service,timer}` and runs
+`systemctl --user enable --now` on the timer. The timer fires 10 seconds after
+enabling, 2 minutes after the user manager starts, then every interval. The
+timer only runs while your user manager runs; for runs while logged out, enable
+lingering with `loginctl enable-linger`. `disable` stops the timer and removes
+only unit files marked as managed by Rundown.
+
+Without systemd, or with an existing external scheduler, invoke the same single-pass command:
 
 ```cron
 0 * * * * /absolute/path/to/rd schedule run --config /absolute/path/to/config/rundown.toml --json >> /absolute/path/to/rundown-schedule.log 2>&1

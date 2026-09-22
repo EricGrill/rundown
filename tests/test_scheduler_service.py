@@ -121,7 +121,7 @@ def test_missing_saved_configuration_is_rejected(environment):
 
 def test_platform_guard(environment, monkeypatch):
     cfg, source, state = environment
-    monkeypatch.setattr(service.sys, "platform", "linux")
+    monkeypatch.setattr(service.sys, "platform", "win32")
     for operation in (lambda: service.enable_service(cfg, source), lambda: service.disable_service(cfg)):
         with pytest.raises(AgentError, match="external scheduler"):
             operation()
