@@ -6,6 +6,7 @@ from datetime import timedelta
 from enum import Enum
 import json
 import sqlite3
+import subprocess
 from pathlib import Path
 from threading import Event
 from time import monotonic
@@ -25,7 +26,7 @@ from rich.text import Text
 from . import categories, db, execution, export, github, history, repo_ops, research_workflow, scoring, wiki
 from . import startup
 from .demo import demo_environment
-from .doctor import run_doctor
+from .doctor import DoctorReport, run_doctor
 from .config import AppConfig, load_config
 from .tui import RundownApp
 from . import search_cli, inspect_cli, discovery_cli, memory_cli, automation_cli, scheduler_cli
@@ -575,17 +576,45 @@ def demo() -> None:
 def doctor(
     config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Print structured diagnostics.")] = False,
+    fix: Annotated[bool, typer.Option("--fix", help="Offer to run each available fix, such as `gh auth login`.")] = False,
 ) -> None:
     """Check installation, configuration, authentication and local catalog health."""
+    if fix and json_output:
+        raise typer.BadParameter("--fix is interactive and cannot be combined with --json.")
     report = run_doctor(config)
     if json_output:
         typer.echo(json.dumps({**asdict(report), "healthy": report.healthy}, indent=2))
-    else:
-        table = Table("Check", "Status", "Details", "Fix")
-        for item in report.checks:
-            table.add_row(Text(item.name), Text(item.status), Text(item.message), Text(item.fix or ""))
-        console.print(table)
+        raise typer.Exit(report.exit_code)
+    _print_doctor(report)
+    if fix:
+        fixes = [(item.name, item.fix_command) for item in report.checks
+                 if item.status != "ok" and item.fix_command]
+        if not fixes:
+            console.print("No automatic fixes are available. Follow the Fix column above.")
+        elif not startup.interactive_terminal():
+            raise typer.BadParameter("--fix needs an interactive terminal.")
+        else:
+            ran = False
+            for name, fix_command in fixes:
+                if typer.confirm(f"Run `{' '.join(fix_command)}` to fix {name}?", default=True):
+                    _run_fix(fix_command)
+                    ran = True
+            if ran:
+                console.print("Checking again.")
+                report = run_doctor(config)
+                _print_doctor(report)
     raise typer.Exit(report.exit_code)
+
+
+def _run_fix(command: tuple[str, ...]) -> None:
+    subprocess.run(list(command), check=False)
+
+
+def _print_doctor(report: DoctorReport) -> None:
+    table = Table("Check", "Status", "Details", "Fix")
+    for item in report.checks:
+        table.add_row(Text(item.name), Text(item.status), Text(item.message), Text(item.fix or ""))
+    console.print(table)
 
 
 @app.command("research-history")

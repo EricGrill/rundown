@@ -112,3 +112,53 @@ def test_read_only_integrity_check_does_not_modify_database(tmp_path, monkeypatc
     run_doctor(config_path)
 
     assert database.stat().st_mtime_ns == before
+
+
+def _unauthenticated_gh(monkeypatch):
+    monkeypatch.setattr("rundown.doctor.shutil.which", lambda name: f"/tools/{name}")
+
+    def run(command, **_kwargs):
+        if command[-2:] == ["auth", "status"]:
+            return subprocess.CompletedProcess(command, 1, "", "not logged in")
+        return subprocess.CompletedProcess(command, 0, f"{Path(command[0]).name} 1.0\n", "")
+
+    monkeypatch.setattr("rundown.doctor.subprocess.run", run)
+
+
+def test_doctor_offers_runnable_github_login_and_names_research_provider(tmp_path, monkeypatch):
+    _unauthenticated_gh(monkeypatch)
+
+    report = run_doctor(_write_config(tmp_path))
+
+    github = next(check for check in report.checks if check.name == "GitHub authentication")
+    assert github.fix_command == ("gh", "auth", "login")
+    provider = next(check for check in report.checks if check.name == "Research provider")
+    assert provider.message.startswith("Research will use claude")
+    assert "`claude auth login`" in provider.fix
+    assert provider.fix_command is None
+
+
+def test_doctor_fix_runs_confirmed_commands_then_rechecks(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from rundown.cli import app
+
+    _unauthenticated_gh(monkeypatch)
+    ran = []
+    monkeypatch.setattr("rundown.cli.startup.interactive_terminal", lambda: True)
+    monkeypatch.setattr("rundown.cli._run_fix", lambda command: ran.append(command))
+
+    result = CliRunner().invoke(app, ["doctor", "--fix", "--config", str(_write_config(tmp_path))], input="y\n")
+
+    assert ran == [("gh", "auth", "login")]
+    assert "Checking again." in result.output
+
+
+def test_doctor_fix_rejects_json(tmp_path):
+    from typer.testing import CliRunner
+
+    from rundown.cli import app
+
+    result = CliRunner().invoke(app, ["doctor", "--fix", "--json", "--config", str(_write_config(tmp_path))])
+
+    assert result.exit_code == 2

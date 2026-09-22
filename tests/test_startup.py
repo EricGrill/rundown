@@ -72,3 +72,26 @@ def test_welcome_keyboard_at_compact_size():
             await pilot.press("enter")
         assert welcome.return_value == "demo"
     asyncio.run(run())
+
+
+def test_provider_summary_names_first_ready_provider(tmp_path):
+    installed = {"claude": None, "gemini": None, "codex": "/bin/codex"}
+    with patch("rundown.doctor.shutil.which", side_effect=lambda name: installed.get(name)):
+        assert startup.provider_summary(AppConfig(root=tmp_path)).startswith("Research will use codex")
+    installed["gemini"] = "/bin/gemini"
+    with patch("rundown.doctor.shutil.which", side_effect=lambda name: installed.get(name)):
+        summary = startup.provider_summary(AppConfig(root=tmp_path))
+    assert summary.startswith("Research will use gemini") and "Also installed: codex" in summary
+
+
+def test_provider_summary_without_providers_keeps_demo_usable(tmp_path):
+    with patch("rundown.doctor.shutil.which", return_value=None):
+        assert "No research provider is installed yet" in startup.provider_summary(AppConfig(root=tmp_path))
+
+
+def test_welcome_shows_provider_note():
+    async def run():
+        welcome = startup.WelcomeApp("Research will use claude.")
+        async with welcome.run_test(size=(80, 24)):
+            assert welcome.query_one("#provider").render().plain == "Research will use claude."
+    asyncio.run(run())
