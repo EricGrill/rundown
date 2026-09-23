@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .config import AppConfig, load_config
+from .config import AppConfig, default_config_location, load_config
 from .harnesses import selected_harnesses
 
 CheckStatus = Literal["ok", "warning", "error"]
@@ -217,6 +217,11 @@ def _database_check(config: AppConfig) -> DoctorCheck:
     return DoctorCheck("Database", "ok", f"SQLite integrity check passed: {database}.")
 
 
+def _config_source(config_path: Path | None) -> str:
+    path = config_path or default_config_location()[0]
+    return str(path) if path.exists() else f"built-in defaults ({path} not found)"
+
+
 def run_doctor(config_path: Path | None = None) -> DoctorReport:
     """Inspect local prerequisites without invoking an AI provider or exposing secrets."""
 
@@ -259,7 +264,7 @@ def run_doctor(config_path: Path | None = None) -> DoctorReport:
             DoctorCheck(
                 "Configuration",
                 "ok",
-                f"Configuration loaded from {config_path or 'defaults/current directory'}.",
+                f"Configuration: {_config_source(config_path)}. Data folder: {config.root}.",
             ),
             _provider_check(config),
             _database_check(config),

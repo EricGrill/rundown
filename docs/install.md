@@ -39,6 +39,16 @@ pipx install git+https://github.com/EricGrill/rundown.git
 rd doctor
 ```
 
+## Where Rundown keeps data
+
+Without `--config`, Rundown uses the first match:
+
+1. `config/rundown.toml` in the current folder, with data beside it.
+2. An existing `data/rundown.sqlite` in the current folder, from earlier versions.
+3. `~/.config/rundown/rundown.toml` for settings and `~/.local/share/rundown` for data.
+
+The third option means running `rd` from any other folder never creates files there. `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are honoured. `rd doctor` prints the configuration and data folder in use.
+
 ## Upgrade
 
 ```console

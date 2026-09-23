@@ -119,3 +119,38 @@ def test_card_dataclasses_validate_programmatic_settings():
         CardSettings(default_view=["host"])
     with pytest.raises(ValueError, match="word_limit"):
         CardTemplateSettings(("hook",), 1001)
+
+
+def test_unrelated_folder_uses_per_user_locations(tmp_path, monkeypatch, isolated_user_dirs):
+    monkeypatch.chdir(tmp_path)
+    config = load_config()
+    assert config.root == isolated_user_dirs / "data" / "rundown"
+    assert config.database_path == isolated_user_dirs / "data" / "rundown" / "data" / "rundown.sqlite"
+    config.ensure_directories()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_user_config_file_keeps_data_in_user_data_folder(tmp_path, monkeypatch, isolated_user_dirs):
+    from rundown.config import user_config_path
+
+    monkeypatch.chdir(tmp_path)
+    source = user_config_path()
+    source.parent.mkdir(parents=True)
+    source.write_text("[research]\nprovider = \"codex\"\n", encoding="utf-8")
+    for config in (load_config(), load_config(source)):
+        assert config.root == isolated_user_dirs / "data" / "rundown"
+        assert config.research.provider == "codex"
+
+
+def test_folder_with_config_or_legacy_catalog_stays_in_place(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    (project / "config").mkdir(parents=True)
+    (project / "config" / "rundown.toml").write_text("", encoding="utf-8")
+    monkeypatch.chdir(project)
+    assert load_config().root == project.resolve()
+
+    legacy = tmp_path / "legacy"
+    (legacy / "data").mkdir(parents=True)
+    (legacy / "data" / "rundown.sqlite").write_bytes(b"")
+    monkeypatch.chdir(legacy)
+    assert load_config().root == legacy.resolve()

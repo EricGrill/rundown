@@ -10,7 +10,7 @@ import sys
 
 from . import scheduler_systemd as systemd
 from .agent_io import AgentError
-from .config import AppConfig
+from .config import AppConfig, default_config_location
 
 
 def service_label(config: AppConfig) -> str:
@@ -109,7 +109,7 @@ def service_status(config: AppConfig) -> dict:
 
 def enable_service(config: AppConfig, config_path: Path | None = None) -> dict:
     _platform()
-    source = (config_path or Path("config/rundown.toml")).resolve()
+    source = (config_path or default_config_location()[0]).resolve()
     if not source.is_file():
         raise AgentError("invalid_config", f"Scheduler needs a saved configuration file: {source}. Pass --config PATH.", 2)
     if _linux():
