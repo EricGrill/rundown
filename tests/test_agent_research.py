@@ -22,7 +22,7 @@ def catalog(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('status,code', [('success', 0), ('cached', 0), ('failed', 1), ('cancelled', 130)])
 def test_json_research_outcomes_and_force(catalog, status, code):
-    with patch('rundown.cli.research_workflow.research_repository', return_value=(status, 'detail')) as call:
+    with patch('rundown.research_cli.research_workflow.research_repository', return_value=(status, 'detail')) as call:
         result = CliRunner().invoke(app, ['research', 'a/b', '--force', '--json'])
     assert result.exit_code == code, result.output
     data = json.loads(result.stdout)
@@ -33,7 +33,7 @@ def test_json_research_outcomes_and_force(catalog, status, code):
 
 @pytest.mark.parametrize('failure', [KeyboardInterrupt(), OperationCancelled('cancel')])
 def test_cancellation_has_machine_error(catalog, failure):
-    with patch('rundown.cli.research_workflow.research_repository', side_effect=failure):
+    with patch('rundown.research_cli.research_workflow.research_repository', side_effect=failure):
         result = CliRunner().invoke(app, ['research', 'a/b', '--json'])
     assert result.exit_code == 130
     assert json.loads(result.stdout)['error']['code'] == 'cancelled'
@@ -41,7 +41,7 @@ def test_cancellation_has_machine_error(catalog, failure):
 
 def test_unknown_research_never_creates_catalog(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    with patch('rundown.cli.research_workflow.research_repository') as call:
+    with patch('rundown.research_cli.research_workflow.research_repository') as call:
         result = CliRunner().invoke(app, ['research', 'a/b', '--json'])
     assert result.exit_code == 1
     assert json.loads(result.stdout)['error']['code'] == 'not_found'

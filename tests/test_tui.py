@@ -330,7 +330,7 @@ def test_removed_action_letters_do_not_trigger_repo_operations(tmp_path):
         with (
             patch("rundown.research_workflow.repo_ops.clone_repo") as clone_repo,
             patch("rundown.research_workflow.research.run_repository_research") as run_research,
-            patch("rundown.tui.subprocess.run") as run_external,
+            patch("rundown.tui_cards.subprocess.run") as run_external,
         ):
             async with app.run_test(size=(120, 30)) as pilot:
                 await pilot.press("c", "u", "s", "a", "x", "f", "i", "e", "w", "o")

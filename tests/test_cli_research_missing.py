@@ -7,7 +7,7 @@ from threading import Event
 from typer.testing import CliRunner
 
 from rundown import db
-from rundown import cli
+from rundown import research_cli
 from rundown.cli import app
 
 
@@ -82,7 +82,7 @@ def test_single_research_uses_cancellable_workflow_and_reports_auto_clone(tmp_pa
         return "success", "Fresh research"
 
     with (
-        patch("rundown.cli.repo_ops.clone_repo", fake_clone),
+        patch("rundown.research_workflow.repo_ops.clone_repo", fake_clone),
         patch(
             "rundown.research_workflow.research.run_repository_research",
             fake_research,
@@ -111,7 +111,7 @@ def test_single_research_sets_cancellation_event_on_keyboard_interrupt(tmp_path)
         raise KeyboardInterrupt
 
     with patch(
-        "rundown.cli.research_workflow.research_repository", interrupt
+        "rundown.research_cli.research_workflow.research_repository", interrupt
     ):
         result = runner.invoke(
             app,
@@ -148,7 +148,7 @@ def test_skips_only_successful_repository_understanding_research(tmp_path):
         return "success", "done"
 
     with (
-        patch("rundown.cli.repo_ops.clone_repo", fake_clone),
+        patch("rundown.research_workflow.repo_ops.clone_repo", fake_clone),
         patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
@@ -167,7 +167,7 @@ def test_cached_status_counts_as_success(tmp_path):
 
     with (
         patch(
-            "rundown.cli.repo_ops.clone_repo",
+            "rundown.research_workflow.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
         patch(
@@ -195,7 +195,7 @@ def test_limit_uses_newest_starred_order_with_name_tiebreaker(tmp_path):
 
     with (
         patch(
-            "rundown.cli.repo_ops.clone_repo",
+            "rundown.research_workflow.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
         patch(
@@ -217,8 +217,8 @@ def test_dry_run_lists_selection_without_clone_or_research(tmp_path):
     )
 
     with (
-        patch("rundown.cli.Live") as live,
-        patch("rundown.cli.repo_ops.clone_repo") as clone_repo,
+        patch("rundown.research_cli.Live") as live,
+        patch("rundown.research_workflow.repo_ops.clone_repo") as clone_repo,
         patch("rundown.research_workflow.research.run_repository_research") as run_research,
     ):
         result = invoke(config_file, "--dry-run", "--limit", "1")
@@ -240,8 +240,8 @@ def test_zero_missing_reports_no_work(tmp_path):
     save_research(database, "saved/project")
 
     with (
-        patch("rundown.cli.Live") as live,
-        patch("rundown.cli.repo_ops.clone_repo") as clone_repo,
+        patch("rundown.research_cli.Live") as live,
+        patch("rundown.research_workflow.repo_ops.clone_repo") as clone_repo,
         patch("rundown.research_workflow.research.run_repository_research") as run_research,
     ):
         result = invoke(config_file)
@@ -268,7 +268,7 @@ def test_failure_continues_to_next_repository_and_exits_nonzero(tmp_path):
 
     with (
         patch(
-            "rundown.cli.repo_ops.clone_repo",
+            "rundown.research_workflow.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
         patch("rundown.research_workflow.research.run_repository_research", fake_research),
@@ -309,7 +309,7 @@ def test_later_exception_preserves_earlier_success_and_continues(tmp_path):
 
     with (
         patch(
-            "rundown.cli.repo_ops.clone_repo",
+            "rundown.research_workflow.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
         patch("rundown.research_workflow.research.run_repository_research", fake_research),
@@ -349,7 +349,7 @@ def test_clone_failure_skips_research_and_continues(tmp_path):
         return "cloned", "done"
 
     with (
-        patch("rundown.cli.repo_ops.clone_repo", fake_clone),
+        patch("rundown.research_workflow.repo_ops.clone_repo", fake_clone),
         patch(
             "rundown.research_workflow.research.run_repository_research",
             side_effect=lambda _config, _conn, name, **_options: researched.append(name)
@@ -400,9 +400,9 @@ def test_terminal_progress_shows_stages_counts_and_results_then_cleans_up(tmp_pa
         return "success", "done"
 
     with (
-        patch.object(cli, "console", terminal_console),
-        patch.object(cli, "Live", side_effect=live_factory),
-        patch("rundown.cli.repo_ops.clone_repo", fake_clone),
+        patch.object(research_cli, "console", terminal_console),
+        patch.object(research_cli, "Live", side_effect=live_factory),
+        patch("rundown.research_workflow.repo_ops.clone_repo", fake_clone),
         patch("rundown.research_workflow.research.run_repository_research", fake_research),
     ):
         result = invoke(config_file)
@@ -455,10 +455,10 @@ def test_keyboard_interrupt_reports_partial_progress_and_commits_completed_work(
         return "success", "done"
 
     with (
-        patch.object(cli, "console", terminal_console),
-        patch.object(cli, "Live", side_effect=live_factory),
+        patch.object(research_cli, "console", terminal_console),
+        patch.object(research_cli, "Live", side_effect=live_factory),
         patch(
-            "rundown.cli.repo_ops.clone_repo",
+            "rundown.research_workflow.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
         patch("rundown.research_workflow.research.run_repository_research", fake_research),
@@ -494,10 +494,10 @@ def test_non_terminal_output_is_plain_and_preserves_markup_like_errors(tmp_path)
         return "cached", "saved result"
 
     with (
-        patch.object(cli, "console", plain_console),
-        patch.object(cli, "Live") as live,
+        patch.object(research_cli, "console", plain_console),
+        patch.object(research_cli, "Live") as live,
         patch(
-            "rundown.cli.repo_ops.clone_repo",
+            "rundown.research_workflow.repo_ops.clone_repo",
             return_value=("already_cloned", "ready"),
         ),
         patch("rundown.research_workflow.research.run_repository_research", fake_research),

@@ -176,7 +176,7 @@ def test_demo_blocks_external_open(tmp_path):
         app = RundownApp(config, fetch_starred=list, demo_mode=True)
         async with app.run_test() as pilot:
             await app.workers.wait_for_complete()
-            with patch("rundown.tui.subprocess.run") as external:
+            with patch("rundown.tui_cards.subprocess.run") as external:
                 app.action_open_github()
                 await pilot.pause()
                 external.assert_not_called()

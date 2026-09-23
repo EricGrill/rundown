@@ -207,7 +207,7 @@ def test_note_save_error_retains_draft_for_retry(tmp_path):
             await app.workers.wait_for_complete()
             await pilot.press('n')
             app.screen.query_one(TextArea).load_text('Keep this unsaved draft.')
-            with patch('rundown.tui.presentation.save_presentation_draft', side_effect=sqlite3.OperationalError('database is locked')):
+            with patch('rundown.tui_cards.presentation.save_presentation_draft', side_effect=sqlite3.OperationalError('database is locked')):
                 await pilot.press('ctrl+s')
                 await pilot.pause()
                 assert isinstance(app.screen, CardEditScreen)
