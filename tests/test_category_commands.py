@@ -51,7 +51,7 @@ def test_sync_command_classifies_new_stars(tmp_path, monkeypatch):
     config_file = tmp_path / 'config.toml'
     database = tmp_path / 'app.sqlite'
     config_file.write_text(f'[paths]\ndatabase = "{database}"\n')
-    monkeypatch.setattr('rundown.cli.github.fetch_starred', lambda **kwargs: [
+    monkeypatch.setattr('rundown.catalog_cli.github.fetch_starred', lambda **kwargs: [
         db.RepoInput('owner/agent', 'owner', 'agent', 'https://github.com/owner/agent', description='LLM agent'),
     ])
     result = CliRunner().invoke(app, ['sync-stars', '-c', str(config_file)])

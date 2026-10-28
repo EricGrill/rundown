@@ -85,7 +85,7 @@ def test_tui_template_changes_feed_research_and_cli_export(tmp_path):
 
     asyncio.run(run())
     output = tmp_path / "show.md"
-    with patch("rundown.cli._config", return_value=config):
+    with patch("rundown.catalog_cli._config", return_value=config):
         result = CliRunner().invoke(cli, ["export", "--view", "host", "--output", str(output)])
     assert result.exit_code == 0, result.output
     content = output.read_text()

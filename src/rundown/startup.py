@@ -15,6 +15,23 @@ from textual.widgets import Button, Static
 from .config import AppConfig
 
 
+def provider_summary(config: AppConfig) -> str:
+    """Say which research provider will receive repository context, without calling it."""
+    from .doctor import ready_providers
+
+    try:
+        available, _blocked = ready_providers(config)
+    except ValueError:
+        return "Research provider settings are invalid. Run `rd doctor` for details."
+    first, *rest = available or ("",)
+    if not first:
+        return ("No research provider is installed yet. Browsing and demo work without one. "
+                "Install Claude Code, Gemini CLI or Codex CLI to generate research.")
+    others = f" Also installed: {', '.join(rest)}." if rest else ""
+    return (f"Research will use {first}, which receives repository context when you research.{others} "
+            "Change it with [research].provider in config/rundown.toml.")
+
+
 class WelcomeApp(App[str | None]):
     TITLE = "Rundown"
     BINDINGS = [Binding("escape", "quit", "Quit")]
@@ -25,6 +42,10 @@ class WelcomeApp(App[str | None]):
     #welcome Button { width: 100%; margin-bottom: 1; }
     """
 
+    def __init__(self, provider_note: str | None = None) -> None:
+        super().__init__()
+        self.provider_note = provider_note
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="welcome"):
             yield Static("Welcome to Rundown", markup=False)
@@ -32,6 +53,8 @@ class WelcomeApp(App[str | None]):
             yield Button("Try demo · offline sample catalog", id="demo", variant="primary")
             yield Button("Connect GitHub · use your starred repositories", id="connect")
             yield Static("Demo changes are temporary. GitHub connection uses your existing gh login. Esc closes.")
+            if self.provider_note:
+                yield Static(self.provider_note, id="provider", markup=False)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id in {"demo", "connect"}:
@@ -75,7 +98,7 @@ def launch(config: AppConfig) -> str | None:
         config.ensure_directories()
         RundownApp(config).run()
         return None
-    choice = WelcomeApp().run()
+    choice = WelcomeApp(provider_summary(config)).run()
     if choice == "demo":
         with demo_environment() as environment:
             RundownApp(environment.config, fetch_starred=environment.fetch_starred, demo_mode=True).run()

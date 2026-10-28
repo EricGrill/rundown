@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .config import AppConfig, load_config
+from .config import AppConfig, default_config_location, load_config
 from .harnesses import selected_harnesses
 
 CheckStatus = Literal["ok", "warning", "error"]
@@ -22,6 +22,8 @@ class DoctorCheck:
     status: CheckStatus
     message: str
     fix: str | None = None
+    # A safe, interactive command `rd doctor --fix` may offer to run.
+    fix_command: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,7 @@ def _github_check() -> DoctorCheck:
             "warning",
             "GitHub CLI is installed but is not authenticated.",
             "Run `gh auth login`.",
+            ("gh", "auth", "login"),
         )
     return DoctorCheck(
         "GitHub authentication",
@@ -111,7 +114,20 @@ def _github_check() -> DoctorCheck:
     )
 
 
-def _provider_check(config: AppConfig) -> DoctorCheck:
+PROVIDER_SIGN_IN = {
+    "claude": "claude auth login",
+    "gemini": "gemini",
+    "codex": "codex login",
+}
+
+
+def _sign_in_hint(names: tuple[str, ...]) -> str:
+    hints = [f"`{PROVIDER_SIGN_IN[name]}`" for name in names if name in PROVIDER_SIGN_IN]
+    return f" Sign in with {' or '.join(hints)}." if hints else ""
+
+
+def ready_providers(config: AppConfig) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Return installed, unblocked harnesses in configured order, plus blocked details."""
     selected = selected_harnesses(config.research)
     blocked = {
         adapter.identifier: detail
@@ -119,20 +135,27 @@ def _provider_check(config: AppConfig) -> DoctorCheck:
         if adapter.preflight and (detail := adapter.preflight(config.research.model))
     }
     available = tuple(adapter.identifier for adapter in selected if shutil.which(adapter.executable))
-    available = tuple(name for name in available if name not in blocked)
+    return tuple(name for name in available if name not in blocked), blocked
+
+
+def _provider_check(config: AppConfig) -> DoctorCheck:
+    selected = selected_harnesses(config.research)
+    available, blocked = ready_providers(config)
     order = ", ".join(adapter.identifier for adapter in selected)
     details = " ".join(f"{name}: {detail}" for name, detail in blocked.items())
     if not available:
         return DoctorCheck(
             "Research provider", "warning" if config.research.provider == "auto" else "error",
             f"No configured research harness is ready. Order: {order}. {details}".strip(),
-            "Install and authenticate a configured harness; saved research still works.",
+            "Install a configured harness (Claude Code, Gemini CLI or Codex CLI); saved research still works."
+            + _sign_in_hint(tuple(adapter.identifier for adapter in selected)),
         )
     return DoctorCheck(
         "Research provider", "ok",
+        f"Research will use {available[0]}, which receives repository context. "
         f"Configured order: {order}. Available: {', '.join(available)}. "
         f"Requested model: {config.research.model or 'CLI default'}. Authentication was not probed. {details}".strip(),
-        "Run the selected provider's own auth-status command if generation fails.",
+        "If generation fails, sign in to the provider." + _sign_in_hint((available[0],)),
     )
 
 
@@ -194,6 +217,11 @@ def _database_check(config: AppConfig) -> DoctorCheck:
     return DoctorCheck("Database", "ok", f"SQLite integrity check passed: {database}.")
 
 
+def _config_source(config_path: Path | None) -> str:
+    path = config_path or default_config_location()[0]
+    return str(path) if path.exists() else f"built-in defaults ({path} not found)"
+
+
 def run_doctor(config_path: Path | None = None) -> DoctorReport:
     """Inspect local prerequisites without invoking an AI provider or exposing secrets."""
 
@@ -236,7 +264,7 @@ def run_doctor(config_path: Path | None = None) -> DoctorReport:
             DoctorCheck(
                 "Configuration",
                 "ok",
-                f"Configuration loaded from {config_path or 'defaults/current directory'}.",
+                f"Configuration: {_config_source(config_path)}. Data folder: {config.root}.",
             ),
             _provider_check(config),
             _database_check(config),

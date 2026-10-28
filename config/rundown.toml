@@ -36,6 +36,13 @@ max_context_chars = 60000
 default_filter = "not_archived"
 default_sort = "starred_at"
 
+[scheduler]
+# Run `rd schedule enable` once on macOS. Completed research is never repeated.
+interval_minutes = 60
+batch_size = 10
+retry_hours = 24
+sync_stars = true
+
 [cards]
 # Each repository remembers the view you choose with v.
 default_view = "host"

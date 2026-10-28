@@ -57,7 +57,7 @@ def test_sync_stars_uses_private_repository_setting(tmp_path, monkeypatch):
         calls.append(include_private)
         return []
 
-    monkeypatch.setattr("rundown.cli.github.fetch_starred", fetch_starred)
+    monkeypatch.setattr("rundown.catalog_cli.github.fetch_starred", fetch_starred)
 
     result = runner.invoke(app, ["sync-stars", "--config", str(config_file)])
 

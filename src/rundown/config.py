@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,6 +62,22 @@ class ResearchSettings:
 class TuiSettings:
     default_filter: str = "not_archived"
     default_sort: str = "starred_at"
+
+
+@dataclass(frozen=True)
+class SchedulerSettings:
+    interval_minutes: int = 60
+    batch_size: int = 10
+    retry_hours: int = 24
+    sync_stars: bool = True
+
+    def __post_init__(self) -> None:
+        for name, maximum in (("interval_minutes", 10080), ("batch_size", 50), ("retry_hours", 720)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+                raise ValueError(f"scheduler.{name} must be an integer between 1 and {maximum}")
+        if not isinstance(self.sync_stars, bool):
+            raise ValueError("scheduler.sync_stars must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -135,6 +152,7 @@ class AppConfig:
     research: ResearchSettings = field(default_factory=ResearchSettings)
     tui: TuiSettings = field(default_factory=TuiSettings)
     cards: CardSettings = field(default_factory=CardSettings)
+    scheduler: SchedulerSettings = field(default_factory=SchedulerSettings)
 
     def resolve(self, path: Path) -> Path:
         return path if path.is_absolute() else (self.root / path).resolve()
@@ -253,9 +271,48 @@ def _custom_harnesses(raw: object) -> dict[str, CustomHarnessSettings]:
     return result
 
 
+LOCAL_CONFIG = Path("config/rundown.toml")
+
+
+def _xdg(variable: str, fallback: str) -> Path:
+    value = os.environ.get(variable)
+    return Path(value) if value and Path(value).is_absolute() else Path.home() / fallback
+
+
+def user_config_path() -> Path:
+    return _xdg("XDG_CONFIG_HOME", ".config") / "rundown" / "rundown.toml"
+
+
+def user_data_root() -> Path:
+    return _xdg("XDG_DATA_HOME", ".local/share") / "rundown"
+
+
+def default_config_location() -> tuple[Path, Path]:
+    """Pick the config file and data root used when no --config is given.
+
+    A checkout or folder that already holds a Rundown config or catalog keeps
+    working in place. Anywhere else uses per-user locations, so running `rd`
+    from an unrelated folder never scatters data/, repos/ or wiki/ there.
+    """
+    if LOCAL_CONFIG.exists():
+        return LOCAL_CONFIG, LOCAL_CONFIG.parent.parent.resolve()
+    cwd = Path.cwd().resolve()
+    if (cwd / "data" / "rundown.sqlite").exists():
+        return LOCAL_CONFIG, cwd
+    return user_config_path(), user_data_root()
+
+
+def _root_for(path: Path) -> Path:
+    if path.exists() and path.resolve() == user_config_path().resolve():
+        return user_data_root()
+    return path.parent.parent.resolve() if path.exists() else Path.cwd().resolve()
+
+
 def load_config(config_path: Path | None = None) -> AppConfig:
-    path = config_path or Path("config/rundown.toml")
-    root = path.parent.parent.resolve() if path.exists() else Path.cwd().resolve()
+    if config_path is None:
+        path, root = default_config_location()
+    else:
+        path, root = config_path, _root_for(config_path)
     data: dict[str, object] = {}
     if path.exists():
         data = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -269,6 +326,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     if set(research) - {"provider", "model", "fallback", "custom", "profile", "timeout_seconds", "max_context_chars"}:
         raise ValueError("Unknown research settings")
     tui = _table(data, "tui")
+    scheduler = data.get("scheduler", {})
+    if not isinstance(scheduler, dict):
+        raise ValueError("scheduler must be a table")
+    if set(scheduler) - {"interval_minutes", "batch_size", "retry_hours", "sync_stars"}:
+        raise ValueError("Unknown scheduler settings")
 
     return AppConfig(
         root=root,
@@ -302,4 +364,5 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             default_sort=str(tui.get("default_sort", "starred_at")),
         ),
         cards=_card_settings(data),
+        scheduler=SchedulerSettings(**scheduler),
     )

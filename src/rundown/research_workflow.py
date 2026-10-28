@@ -21,6 +21,7 @@ def research_repository(
     force: bool = False,
     cancel_event: Event | None = None,
     on_stage: StageCallback | None = None,
+    clone_timeout: float | None = None,
 ) -> tuple[str, str]:
     """Clone when needed and research one repository using effective card settings.
 
@@ -46,12 +47,16 @@ def research_repository(
     if on_stage is not None:
         on_stage("cloning", "Preparing the local repository copy.")
     check_cancelled(cancel_event)
-    clone_options = (
-        {"cancel_event": cancel_event} if cancel_event is not None else {}
-    )
-    clone_status, clone_message = repo_ops.clone_repo(
-        effective_config, conn, full_name, **clone_options
-    )
+    if clone_timeout is not None:
+        clone_status, clone_message = repo_ops.clone_repo(
+            effective_config, conn, full_name, cancel_event=cancel_event, timeout=clone_timeout,
+        )
+    elif cancel_event is not None:
+        clone_status, clone_message = repo_ops.clone_repo(
+            effective_config, conn, full_name, cancel_event=cancel_event,
+        )
+    else:
+        clone_status, clone_message = repo_ops.clone_repo(effective_config, conn, full_name)
     if clone_status == "failed":
         check_cancelled(cancel_event)
         return (

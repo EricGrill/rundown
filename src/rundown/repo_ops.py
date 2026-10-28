@@ -10,7 +10,8 @@ from .config import AppConfig
 from .processes import check_cancelled, run_command
 
 
-def clone_repo(config: AppConfig, conn, full_name: str, *, cancel_event: Event | None = None) -> tuple[str, str]:
+def clone_repo(config: AppConfig, conn, full_name: str, *, cancel_event: Event | None = None,
+               timeout: float | None = None) -> tuple[str, str]:
     check_cancelled(cancel_event)
     row = db.get_repo(conn, full_name)
     if row is None:
@@ -32,7 +33,7 @@ def clone_repo(config: AppConfig, conn, full_name: str, *, cancel_event: Event |
         return "already_cloned", f"Found existing clone for {full_name} at {target}."
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    if cancel_event is None:
+    if cancel_event is None and timeout is None:
         result = subprocess.run(
             ["gh", "repo", "clone", full_name, str(target)],
             text=True, capture_output=True,
@@ -46,7 +47,7 @@ def clone_repo(config: AppConfig, conn, full_name: str, *, cancel_event: Event |
             staged = Path(directory) / "repo"
             result = run_command(
                 ["gh", "repo", "clone", full_name, str(staged)],
-                text=True, capture_output=True, cancel_event=cancel_event,
+                text=True, capture_output=True, cancel_event=cancel_event, timeout=timeout,
             )
             check_cancelled(cancel_event)
             if result.returncode == 0:
